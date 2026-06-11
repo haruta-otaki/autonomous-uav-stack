@@ -1,0 +1,10 @@
+{
+    "ROS2.distro": "noetic",
+    "python.autoComplete.extraPaths": [
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/opt/ros/noetic/lib/python3/dist-packages"
+    ],
+    "C_Cpp.default.compileCommands": "/home/w220501/autonomous_drone/catkin_ws/build/compile_commands.json"
+}
