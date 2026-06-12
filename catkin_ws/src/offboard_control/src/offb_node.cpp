@@ -6,6 +6,9 @@
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 
+#include <string>
+#include <array>
+
 // callback that saves the current state of the autopilot 
 mavros_msgs::State current_state; 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -19,13 +22,13 @@ void state_cb(const mavros_msgs::State::ConstPtr& msg){
 // offboard mode is defined as a mode in which the drone is controlled by an external computer (ros node)
 int main(int argc, char **argv) {
     // starts ros node
-    ros::init(argc, argv, "offb_node");
+    ros::init(argc, argv, "offboard_control_node");
     // node's access point to ros
     ros::NodeHandle nh;
 
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
-        ("mavros_state", 10, state_cb);
+        ("mavros/state", 10, state_cb);
         
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
@@ -63,19 +66,24 @@ int main(int argc, char **argv) {
 
     // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
     // 100 messages across 5 seconds before requesting offboard 
-    for (int i = 100; ros::ok() && i > 0; i--) {
+    for (int i = 100; ros::ok() && i > 0; --i) {
         local_pos_pub.publish(pose);
         ros::spinOnce();
         rate.sleep();
     }
 
+    // FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
+    std::string modes[10] {"INIT", "WAIT", "PRESET", "OFFBOARD", "TAKEOFF", "WAYPOINT_1", "WAYPOINT_2", "WAYPOINT_3", "LAND", "HALT"};
+    
     mavros_msgs::SetMode offb_set_mode; 
-    offb_set_mode.request.custom_mode = "OFFBOARD";
+    offb_set_mode.request.custom_mode = modes[4];
 
     mavros_msgs::CommandBool arm_cmd; 
     arm_cmd.request.value = true; 
 
     ros::Time last_request = ros::Time::now();
+
+
 
     // while ros is running normally... 
     while(ros::ok()) {
@@ -95,8 +103,8 @@ int main(int argc, char **argv) {
                 if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
                     ROS_INFO("vehicle armed");
                 }
+                last_request = ros::Time::now();
             }
-            last_request = ros::Time::now();
         }
         // continue sending the requested pose at the appropriate rate 
         local_pos_pub.publish(pose);
