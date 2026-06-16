@@ -17,6 +17,12 @@ mavros_msgs/SetMode.h
 -
 mavros_msgs/State.h
 -
+string
+-
+array
+-
+vector
+-
 
 /opt/ros/noetic/include/geometry_msgs/Point.h
 string
