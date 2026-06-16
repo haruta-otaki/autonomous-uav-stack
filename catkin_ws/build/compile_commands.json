@@ -20,6 +20,11 @@
   "file": "/usr/src/googletest/googletest/src/gtest-all.cc"
 },
 {
+  "directory": "/home/w220501/autonomous_drone/catkin_ws/build/failure_sim",
+  "command": "/usr/bin/c++  -DROSCONSOLE_BACKEND_LOG4CXX -DROS_BUILD_SHARED_LIBS=1 -DROS_PACKAGE_NAME=\\\"failure_sim\\\" -I/opt/ros/noetic/include -I/opt/ros/noetic/share/xmlrpcpp/cmake/../../../include/xmlrpcpp    -o CMakeFiles/failure_sim_node.dir/src/failure_sim_node.cpp.o -c /home/w220501/autonomous_drone/catkin_ws/src/failure_sim/src/failure_sim_node.cpp",
+  "file": "/home/w220501/autonomous_drone/catkin_ws/src/failure_sim/src/failure_sim_node.cpp"
+},
+{
   "directory": "/home/w220501/autonomous_drone/catkin_ws/build/offboard_control",
   "command": "/usr/bin/c++  -DROSCONSOLE_BACKEND_LOG4CXX -DROS_BUILD_SHARED_LIBS=1 -DROS_PACKAGE_NAME=\\\"offboard_control\\\" -I/opt/ros/noetic/include -I/opt/ros/noetic/share/xmlrpcpp/cmake/../../../include/xmlrpcpp    -o CMakeFiles/offboard_control_node.dir/src/offb_node.cpp.o -c /home/w220501/autonomous_drone/catkin_ws/src/offboard_control/src/offb_node.cpp",
   "file": "/home/w220501/autonomous_drone/catkin_ws/src/offboard_control/src/offb_node.cpp"

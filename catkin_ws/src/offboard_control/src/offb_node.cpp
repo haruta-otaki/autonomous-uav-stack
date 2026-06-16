@@ -114,8 +114,8 @@ int main(int argc, char **argv) {
     ros::Rate rate(20.0);
 
     std::vector<geometry_msgs::PoseStamped> waypoints = {
-        make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(7.0, 0.0, 2.0), make_pose(7.0, 7.0, 2.0), 
-        make_pose(0.0, 7.0, 2.0), make_pose(0.0, 7.0, 0.3), make_pose(0.0, 7.0, 0.3) 
+        make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(0.0, 9.5, 2.0), make_pose(-15.0, 9.5, 2.0), 
+        make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
     };
 
     int mode_index = 0;
