@@ -30,15 +30,18 @@ geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geo
     double dy = target.pose.position.y - current.pose.position.y;
     double dz = target.pose.position.z - current.pose.position.z;
     double d =  std::sqrt(dx * dx + dy * dy + dz * dz);
+    geometry_msgs::PoseStamped next_pose;
+    // set orientation (w) to 1.0 as, otherwise, it initializes an invalid, zero quaternion (0,0,0,0) for the pose
+    next_pose.pose.orientation.w = 1.0; 
+
     if (d < step) {
-        return target; 
+        next_pose.pose.position = target.pose.position; 
     } else {
-        geometry_msgs::PoseStamped next_pose;
         next_pose.pose.position.x = current.pose.position.x + dx * (step / d); 
         next_pose.pose.position.y = current.pose.position.y + dy * (step / d); 
         next_pose.pose.position.z = current.pose.position.z + dz * (step / d); 
-        return next_pose;
     }
+    return next_pose;
 }
 
 geometry_msgs::PoseStamped make_pose(double x, double y, double z) {
@@ -112,7 +115,7 @@ int main(int argc, char **argv) {
 
     std::vector<geometry_msgs::PoseStamped> waypoints = {
         make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(7.0, 0.0, 2.0), make_pose(7.0, 7.0, 2.0), 
-        make_pose(0.0, 7.0, 2.0), make_pose(7.0, 0.0, 0.0), make_pose(7.0, 0.0, 0.0)
+        make_pose(0.0, 7.0, 2.0), make_pose(0.0, 7.0, 0.3), make_pose(0.0, 7.0, 0.3) 
     };
 
     int mode_index = 0;

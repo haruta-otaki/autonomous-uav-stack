@@ -51,4 +51,25 @@
         <arg name="fcu_url" value="$(arg fcu_url)"/>
         <arg name="respawn_mavros" value="$(arg respawn_mavros)"/>
     </include>
+    <!-- rosbag -->
+    <node 
+        pkg="rosbag"
+        type="record"
+        name="rosbag_record"
+        output="screen"
+        args="-o $(find offboard_control)/bags/flight
+            /mavros/state
+            /mavros/local_position/pose
+            /mavros/local_position/velocity_local
+            /mavros/global_position/global
+            /mavros/global_position/rel_alt
+            /mavros/imu/data
+            /mavros/setpoint_position/local
+            /mavros/setpoint_raw/local
+            /mavros/rc/in
+            /mavros/battery
+            /mavros/extended_state
+            /tf
+            /tf_static
+            /rosout"/>
 </launch>
