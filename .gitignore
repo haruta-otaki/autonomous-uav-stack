@@ -1,1 +1,12 @@
 .venv/
+
+# ROS catkin build artifacts
+catkin_ws/build/
+catkin_ws/devel/
+catkin_ws/install/
+
+# VS Code
+.vscode/
+
+# rosbag files 
+*.bag
