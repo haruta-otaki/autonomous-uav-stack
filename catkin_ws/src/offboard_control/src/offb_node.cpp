@@ -93,9 +93,9 @@ int main(int argc, char **argv) {
 
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
-        ("mavros/state", 10, state_cb);
+        ("offboard_control/intermediate_state_setpoint", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
-        ("mavros/local_position/pose", 10, pose_cb);
+        ("offboard_control/intermediate_pose_setpoint", 10, pose_cb);
         
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 

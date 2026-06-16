@@ -68,16 +68,15 @@ void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
 //     return current_state.connected && current_state.mode == "OFFBOARD" && current_state.armed;
 // }
 
-// // FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
-// enum class Mode {
-//     Init, 
-//     Offboard, 
-//     Waypoint_1,
-//     Waypoint_2,
-//     Waypoint_3,
-//     Land,
-//     Halt
-// };
+enum class Mode {
+    Normal, 
+    Short_Dropout,
+    Long_Dropout,
+    Burst_Short_Dropout,
+    Burst_Long_Dropout,
+    Command_Degradation,
+    State_Degradation
+};
 
 int main(int argc, char **argv) {
     // starts ros node
@@ -89,14 +88,17 @@ int main(int argc, char **argv) {
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("mavros/local_position/pose", 10, pose_cb);
-        
-    // ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
-    //     ("mavros/setpoint_position/local", 10);
+    
+    ros::Publisher intermediate_state_pub = nh.advertise<mavros_msgs::State> 
+        ("offboard_control/intermediate_state_setpoint", 10);
 
-    ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
-        ("mavros/cmd/arming");
-    ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
-        ("mavros/set_mode");
+    ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
+        ("offboard_control/intermediate_pose_setpoint", 10);
+
+    // ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
+    //     ("mavros/cmd/arming");
+    // ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
+    //     ("mavros/set_mode");
     
     // setpoint publishing rate must be faster than 2 Hz 
     // PX4 has a timeout of 500 ms between two offboard commands, and fall backs to the last mode if timeout is exceeded 
@@ -108,14 +110,14 @@ int main(int argc, char **argv) {
     //     make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
     // };
 
-    int mode_index = 0;
+    // int mode_index = 0;
 
-    mavros_msgs::SetMode offboard_set_mode; 
-    mavros_msgs::SetMode land_set_mode; 
+    // mavros_msgs::SetMode offboard_set_mode; 
+    // mavros_msgs::SetMode land_set_mode; 
 
-    mavros_msgs::SetMode manual_set_mode; 
+    // mavros_msgs::SetMode manual_set_mode; 
 
-    mavros_msgs::CommandBool arm_cmd; 
+    // mavros_msgs::CommandBool arm_cmd; 
 
     // geometry_msgs::PoseStamped command_pose = waypoints[0];
 
@@ -125,162 +127,60 @@ int main(int argc, char **argv) {
 
     // bool dwelling = false; 
     
-    // Mode current_mode = Mode::Init;
-    // ROS_INFO("initializing...");
+    Mode current_mode = Mode::Normal;
+    ROS_INFO("failure simulation setting up...");
 
-    // // while ros is running normally... 
-    // while(ros::ok()) {
-    //     switch (current_mode) {
-    //         case Mode::Init: 
-    //             offboard_set_mode.request.custom_mode = "OFFBOARD";
-    //             arm_cmd.request.value = true; 
+    while(ros::ok()) {
+        switch (current_mode) {
+            case Mode::Normal: 
+                // offboard_set_mode.request.custom_mode = "OFFBOARD";
+                // arm_cmd.request.value = true; 
 
-    //             // wait for connection to be established between mavros and the autopilot 
-    //             // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
-    //             while(ros::ok() && !current_state.connected) {
-    //                 // lets ros process callbacks once to update current_state
-    //                 ros::spinOnce();
-    //                 rate.sleep();
-    //             }
+                // // wait for connection to be established between mavros and the autopilot 
+                // // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
+                // while(ros::ok() && !current_state.connected) {
+                //     // lets ros process callbacks once to update current_state
+                //     ros::spinOnce();
+                //     rate.sleep();
+                // }
 
-    //             // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
-    //             // 100 messages across 5 seconds before requesting offboard 
-    //             for (int i = 100; ros::ok() && i > 0; --i) {
-    //                 local_pos_pub.publish(waypoints[mode_index]);
-    //                 ros::spinOnce();
-    //                 rate.sleep();
-    //             }
+                // // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
+                // // 100 messages across 5 seconds before requesting offboard 
+                // for (int i = 100; ros::ok() && i > 0; --i) {
+                //     local_pos_pub.publish(waypoints[mode_index]);
+                //     ros::spinOnce();
+                //     rate.sleep();
+                // }
 
-    //             // handleMode(current_mode);
-    //             mode_index += 1; 
-    //             current_mode = Mode::Offboard;
-    //             ROS_INFO("offboarding...");
-    //             break;
-    //         case Mode::Offboard:
-    //             // space the service calls by 5s (usually shorter) to not flood the autopilot with requests 
-    //             if (current_state.mode != "OFFBOARD" && 
-    //             (ros::Time::now() - last_request > ros::Duration(5.0))) {
-    //                 // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-    //                 if (set_mode_client.call(offboard_set_mode) && offboard_set_mode.response.mode_sent) {
-    //                     ROS_INFO("offboard enabled");
-    //                 }
-    //                 last_request = ros::Time::now();
-    //             } else {
-    //                 // arm the quad to allow it to fly (spin motors & apply actuator outputs)
-    //                 if (!current_state.armed && 
-    //                     (ros::Time::now() - last_request > ros::Duration(5.0))) {
-    //                     // asks to arm the vehicle && checks mavros' consequential action
-    //                     if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
-    //                         ROS_INFO("vehicle armed");
-    //                     }
-    //                     last_request = ros::Time::now();
-    //                 }
-    //                 if (current_state.armed && 
-    //                     (ros::Time::now() - last_request > ros::Duration(0.5))) {
-    //                     ROS_INFO("hovering(1)...");
-    //                 }
-    //             }
-    //             if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-    //                 dwelling = true; 
-    //                 dwell_start_time = ros::Time::now();
-    //             }
-    //             if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
-    //                 if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
-    //                     ROS_INFO("dwelling completed");
-    //                     ROS_INFO("hovering(1)...");
-    //                     dwelling = false; 
-    //                     mode_index += 1; 
-    //                     current_mode = Mode::Waypoint_1;
-    //                 }
-    //             }
-
-    //             // handleMode(current_mode);
-    //             break;
-    //         case Mode::Waypoint_1: 
-    //             // handleMode(current_mode);
-    //             if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-    //                 dwelling = true; 
-    //                 dwell_start_time = ros::Time::now();
-    //             }
-    //             if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
-    //                 if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
-    //                     ROS_INFO("dwelling completed");
-    //                     ROS_INFO("hovering(2)...");
-    //                     dwelling = false; 
-    //                     mode_index += 1; 
-    //                     current_mode = Mode::Waypoint_2;
-    //                 }
-    //             }
-
-    //             break;
-    //         case Mode::Waypoint_2: 
-    //             if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-    //                 dwelling = true; 
-    //                 dwell_start_time = ros::Time::now();
-    //             }
-    //             if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
-    //                 if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
-    //                     ROS_INFO("dwelling completed");
-    //                     ROS_INFO("hovering(3)...");
-    //                     dwelling = false; 
-    //                     mode_index += 1; 
-    //                     current_mode = Mode::Waypoint_3;
-    //                 }
-    //             }
-    //             break;
-    //         case Mode::Waypoint_3: 
-    //             if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-    //                 dwelling = true; 
-    //                 dwell_start_time = ros::Time::now();
-    //             }
-    //             if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
-    //                 if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
-    //                     ROS_INFO("dwelling completed");
-    //                     ROS_INFO("landing...");
-    //                     dwelling = false; 
-    //                     mode_index += 1; 
-    //                     current_mode = Mode::Land;
-    //                 }
-    //             }
-    //             break;
-    //         case Mode::Land: 
-    //             if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-    //                 dwelling = true; 
-    //                 dwell_start_time = ros::Time::now();
-    //             }
-    //             if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
-    //                 if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
-    //                     ROS_INFO("dwelling completed");
-    //                     ROS_INFO("halting...");
-    //                     dwelling = false; 
-    //                     mode_index += 1; 
-    //                     current_mode = Mode::Halt;
-    //                 }
-    //             }
-    //             break;
-    //         case Mode::Halt: 
-    //             land_set_mode.request.custom_mode = "AUTO.LAND";
-    //             if (current_state.mode != "AUTO.LAND" && 
-    //             (ros::Time::now() - last_request > ros::Duration(5.0))) {
-    //                 // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-    //                 if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
-    //                     ROS_INFO("landing enabled");
-    //                 }
-    //                 last_request = ros::Time::now();
-    //             } 
+                // // handleMode(current_mode);
+                // mode_index += 1; 
+                // current_mode = Mode::Offboard;
+                // ROS_INFO("offboarding...");
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
+            // case Mode::Halt: 
+            //     land_set_mode.request.custom_mode = "AUTO.LAND";
+            //     if (current_state.mode != "AUTO.LAND" && 
+            //     (ros::Time::now() - last_request > ros::Duration(5.0))) {
+            //         // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
+            //         if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
+            //             ROS_INFO("landing enabled");
+            //         }
+            //         last_request = ros::Time::now();
+            //     } 
                    
-    //             break;
-    //     }
+            //     break;
+        }
 
-    //     if (mode_index < waypoints.size()) {
-    //         // continue sending the requested pose at the appropriate rate 
-    //         // interpolation set at 5cm / tick (1 m/s)
-    //         command_pose = interpolation(command_pose, waypoints[mode_index], 0.05);
-    //         local_pos_pub.publish(command_pose);
-    //     }
-    //     //keeps the loop at 20 Hz
-    //     ros::spinOnce();
-    //     rate.sleep();
-    // }
+        // if (mode_index < waypoints.size()) {
+        //     // continue sending the requested pose at the appropriate rate 
+        //     // interpolation set at 5cm / tick (1 m/s)
+        //     command_pose = interpolation(command_pose, waypoints[mode_index], 0.05);
+        // }
+        //keeps the loop at 20 Hz
+        ros::spinOnce();
+        rate.sleep();
+    }
     return 0; 
 }
