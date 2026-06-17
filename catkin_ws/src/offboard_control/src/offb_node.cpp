@@ -7,16 +7,69 @@
 #include <mavros_msgs/State.h>
 
 #include <string>
-#include <array>
 #include <vector>
 #include <limits>
 
-// global variables
-double TOL = 0.3; 
-mavros_msgs::State current_state; 
-ros::Time time_cb; 
-bool received_pose; 
-geometry_msgs::PoseStamped current_pose; 
+struct Watchdog {
+    //fields 
+    int consecutive_feeds = 0; 
+    ros::Time last_cb; 
+    bool warn = false; 
+    bool trigger = false; 
+    double warn_timeout; 
+    double trigger_timeout; 
+    int feed_threshold = 4; 
+
+    // constructor 
+    Watchdog(double warn_time=0.4, double trigger_time=0.8) {
+        warn_timeout = warn_time;
+        trigger_timeout = trigger_time;
+        last_cb = ros::Time::now();
+    }
+
+    // methods
+    void feed() {
+        last_cb = ros::Time::now();
+        consecutive_feeds += 1; 
+        if (consecutive_feeds > feed_threshold) {
+            warn = false; 
+            trigger = false; 
+        }
+    }
+
+    void tick() {
+        if (!warn && ros::Time::now() - last_cb > ros::Duration(warn_timeout)) {
+            consecutive_feeds = 0; 
+            warn = true; 
+            ROS_WARN("Watchdog: no pose received, monitoring...");
+        }
+        if (!trigger && ros::Time::now() - last_cb > ros::Duration(trigger_timeout)) {
+            consecutive_feeds = 0; 
+            trigger = true; 
+            ROS_ERROR("Watchdog: communication loss detected, trigerring offboard...");
+        }
+    }
+
+    bool is_healthy() {
+        return !trigger; 
+    }
+};
+
+struct MachineState {
+    //fields 
+    geometry_msgs::PoseStamped pose; 
+    Mode mode; 
+
+    // constructor 
+    MachineState(double x, double y, double z, Mode m) {
+        pose.pose.position.x = x; 
+        pose.pose.position.y = y; 
+        pose.pose.position.z = z; 
+        pose.pose.orientation.w = 1.0; 
+
+        mode = m; 
+    }
+};
 
 // FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
 enum class Mode {
@@ -31,6 +84,13 @@ enum class Mode {
     Halt
 };
 
+// global variables
+bool received_pose = false; 
+
+mavros_msgs::State current_state; 
+geometry_msgs::PoseStamped current_pose; 
+Watchdog pose_watchdog(0.4, 0.8);
+
 // callback that saves the current state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
     current_state = *msg;
@@ -39,7 +99,7 @@ void state_cb(const mavros_msgs::State::ConstPtr& msg){
 void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
     received_pose = true; 
-    time_cb = ros::Time::now();
+    pose_watchdog.feed();
 }
 
 
@@ -63,16 +123,16 @@ geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geo
     return next_pose;
 }
 
-int find_waypoint(geometry_msgs::PoseStamped current, std::vector<geometry_msgs::PoseStamped> waypoints, std::vector<Mode> modes) {
+int find_waypoint(geometry_msgs::PoseStamped current, std::vector<MachineState> states) {
     int index = 3; 
 
     double minimum_d = std::numeric_limits<double>::max();
-    int n = waypoints.size() - 1; 
+    int n = states.size() - 1; 
     // temporarily hard coded 
     for (int i = 3; i < n; i++) {
-        double dx = waypoints[i].pose.position.x - current.pose.position.x;
-        double dy = waypoints[i].pose.position.y - current.pose.position.y;
-        double dz = waypoints[i].pose.position.z - current.pose.position.z;
+        double dx = states[i].pose.pose.position.x - current.pose.position.x;
+        double dy = states[i].pose.pose.position.y - current.pose.position.y;
+        double dz = states[i].pose.pose.position.z - current.pose.position.z;
         double d =  std::sqrt(dx * dx + dy * dy + dz * dz);
         if (d < minimum_d) {
             index = i;
@@ -80,20 +140,6 @@ int find_waypoint(geometry_msgs::PoseStamped current, std::vector<geometry_msgs:
         }
     }
     return index; 
-}
-
-geometry_msgs::PoseStamped make_pose(double x, double y, double z) {
-    // PX4 flight stack operates in NED coordinate frame but mavros translates them to standard ENU frame 
-    // target position that is consistently sent to px4 (it expects continous commands)
-    // poseStamped: postition+orientation+timeframe
-    // NED: x: North, y: East, z: Down
-    // ENU: x: East, y: North, z: Up
-    geometry_msgs::PoseStamped pose;
-    pose.pose.position.x = x; 
-    pose.pose.position.y = y; 
-    pose.pose.position.z = z; 
-    pose.pose.orientation.w = 1.0; 
-    return pose;
 }
 
 bool at_waypoint(geometry_msgs::PoseStamped target_pose, double tol) {
@@ -105,6 +151,14 @@ bool at_waypoint(geometry_msgs::PoseStamped target_pose, double tol) {
 
 bool vehicle_stability() {
     return current_state.connected && current_state.mode == "OFFBOARD" && current_state.armed;
+}
+
+bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamped waypoint, double tol) {
+    if (!dwelling && at_waypoint(waypoint, tol)) {
+        dwelling = true; 
+        dwell_start_time = ros::Time::now();
+    }
+    return at_waypoint(waypoint, tol) && vehicle_stability() && dwelling;
 }
 
 // a topic is continuous streaming
@@ -140,42 +194,34 @@ int main(int argc, char **argv) {
     // recommended to enter offboard mode from position mode
     ros::Rate rate(20.0);
 
-    std::vector<geometry_msgs::PoseStamped> waypoints = {
-        make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(0.0, 9.5, 2.0), make_pose(-15.0, 9.5, 2.0), 
-        make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
+    std::vector<MachineState> states = {
+        MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(0.0, 0.0, 2.0, Mode::Prestream), MachineState(0.0, 0.0, 2.0, Mode::Offboard), 
+        MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), 
+        MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3), MachineState(-15.0, 15.0, 0.3, Mode::Land), MachineState(-15.0, 15.0, 0.3, Mode::Halt)
     };
-        
-    std::vector<Mode> modes = {
-        Mode::Init, Mode::Prestream, Mode::Offboard, Mode::Waypoint_0, Mode::Waypoint_1, Mode::Waypoint_2, Mode::Waypoint_3, Mode::Land, Mode::Halt
-    };
-
-    
 
     int mode_index = 0;
     int index = 3; 
+    bool dwelling = false; 
+    double tol = 0.3; 
 
     mavros_msgs::SetMode offboard_set_mode; 
     mavros_msgs::SetMode land_set_mode; 
 
-    mavros_msgs::SetMode manual_set_mode; 
-
-    mavros_msgs::CommandBool arm_cmd; 
-
-    geometry_msgs::PoseStamped command_pose = waypoints[0];
-
     ros::Time last_request = ros::Time::now();
     ros::Time dwell_start_time = ros::Time::now();
 
-
-    bool dwelling = false; 
+    // currently unused 
+    mavros_msgs::CommandBool arm_cmd; 
     
+    ROS_INFO("initializing...");
     Mode current_mode = Mode::Init;
+    geometry_msgs::PoseStamped command_pose = current_pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
         switch (current_mode) {
             case Mode::Init: 
-                ROS_INFO("initializing...");
                 offboard_set_mode.request.custom_mode = "OFFBOARD";
                 arm_cmd.request.value = true; 
 
@@ -190,7 +236,7 @@ int main(int argc, char **argv) {
                 // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
                 // 100 messages across 5 seconds before requesting offboard 
                 for (int i = 100; ros::ok() && i > 0; --i) {
-                    local_pos_pub.publish(waypoints[mode_index]);
+                    local_pos_pub.publish(states[mode_index].pose);
                     ros::spinOnce();
                     rate.sleep();
                 }
@@ -202,9 +248,10 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Prestream:
                 local_pos_pub.publish(current_pose);
+                pose_watchdog.tick();
 
-                if (received_pose && ros::Time::now() - time_cb > ros::Duration(0.5)) {
-                    ROS_WARN("communication delay detected. offboarding...");
+                if (received_pose && !pose_watchdog.is_healthy()) {
+                    ROS_INFO("offboarding...");
                     mode_index += 1; 
                     current_mode = Mode::Offboard;
                 }
@@ -220,11 +267,12 @@ int main(int argc, char **argv) {
                     last_request = ros::Time::now();
                 } 
                 // comment out the arm logic it is assumed the drone is already armed and manually controlled
-                if (current_state.mode == "OFFBOARD") {
+                if (current_state.mode == "OFFBOARD" && 
+                (ros::Time::now() - last_request > ros::Duration(0.5))) {
                     ROS_INFO("hovering...");
-                    index = find_waypoint(current_pose, waypoints, modes);
+                    index = find_waypoint(current_pose, states);
                     mode_index = index; 
-                    current_mode = modes[index];
+                    current_mode = states[index].mode;
                 }
                 // else {
                 //     // arm the quad to allow it to fly (spin motors & apply actuator outputs)
@@ -241,16 +289,12 @@ int main(int argc, char **argv) {
                 //         ROS_INFO("hovering...");
                 //         index = find_waypoint(current_pose, waypoints, modes);
                 //         mode_index = index; 
-                //         current_mode = modes[index];
+                //         current_mode = states[index].mode;
                 //     }
                 // }
                 break;
                 case Mode::Waypoint_0:
-                if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-                    dwelling = true; 
-                    dwell_start_time = ros::Time::now();
-                }
-                if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
+                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                     if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(1)...");
@@ -262,11 +306,7 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Waypoint_1: 
                 // handleMode(current_mode);
-                if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-                    dwelling = true; 
-                    dwell_start_time = ros::Time::now();
-                }
-                if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
+                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                     if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(2)...");
@@ -278,11 +318,7 @@ int main(int argc, char **argv) {
 
                 break;
             case Mode::Waypoint_2: 
-                if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-                    dwelling = true; 
-                    dwell_start_time = ros::Time::now();
-                }
-                if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
+                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                     if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(3)...");
@@ -293,11 +329,7 @@ int main(int argc, char **argv) {
                 }
                 break;
             case Mode::Waypoint_3: 
-                if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-                    dwelling = true; 
-                    dwell_start_time = ros::Time::now();
-                }
-                if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
+                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                     if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("landing...");
@@ -308,11 +340,7 @@ int main(int argc, char **argv) {
                 }
                 break;
             case Mode::Land: 
-                if (!dwelling && at_waypoint(waypoints[mode_index], TOL)) {
-                    dwelling = true; 
-                    dwell_start_time = ros::Time::now();
-                }
-                if (at_waypoint(waypoints[mode_index], TOL) && vehicle_stability() && dwelling) {
+                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                     if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("halting...");
@@ -336,10 +364,10 @@ int main(int argc, char **argv) {
                 break;
         }
 
-        if (mode_index > 1 && mode_index < waypoints.size()) {
+        if (mode_index > 1 && mode_index < states.size()) {
             // continue sending the requested pose at the appropriate rate 
             // interpolation set at 5cm / tick (1 m/s)
-            command_pose = interpolation(command_pose, waypoints[mode_index], 0.05);
+            command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
             local_pos_pub.publish(command_pose);
         }
         //keeps the loop at 20 Hz
