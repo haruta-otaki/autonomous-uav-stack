@@ -153,12 +153,16 @@ bool vehicle_stability() {
     return current_state.connected && current_state.mode == "OFFBOARD" && current_state.armed;
 }
 
+// C++ passes by value using copy by default, thus references are made to manipulate the original dwell-related variables
 bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamped waypoint, double tol) {
     if (!dwelling && at_waypoint(waypoint, tol)) {
         dwelling = true; 
         dwell_start_time = ros::Time::now();
     }
-    return at_waypoint(waypoint, tol) && vehicle_stability() && dwelling;
+    
+
+    return at_waypoint(waypoint, tol) && vehicle_stability() && dwelling && 
+        (ros::Time::now() - dwell_start_time > ros::Duration(2.0));
 }
 
 // a topic is continuous streaming
@@ -295,59 +299,54 @@ int main(int argc, char **argv) {
                 break;
                 case Mode::Waypoint_0:
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                    if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(1)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_1;
-                    }
+                    
                 }
                 break;
             case Mode::Waypoint_1: 
                 // handleMode(current_mode);
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                    if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(2)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_2;
-                    }
+                    
                 }
 
                 break;
             case Mode::Waypoint_2: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                    if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("hovering(3)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_3;
-                    }
+                    
                 }
                 break;
             case Mode::Waypoint_3: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                    if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("landing...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Land;
-                    }
+                    
                 }
                 break;
             case Mode::Land: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                    if ((ros::Time::now() - dwell_start_time > ros::Duration(2.0))) {
                         ROS_INFO("dwelling completed");
                         ROS_INFO("halting...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Halt;
-                    }
+                    
                 }
                 break;
             case Mode::Halt: 
