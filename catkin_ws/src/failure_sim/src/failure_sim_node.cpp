@@ -1,11 +1,9 @@
 #include <ros/ros.h>
 #include <geometry_msgs/PoseStamped.h>
 
-// contains all custom messages required to operate services and topics by mavros
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
-
 
 #include <string>
 #include <vector>
@@ -13,8 +11,17 @@
 #include <thread>
 #include <iostream>
 #include <mutex>
+#include <random>
 
-std::mutex mtx; 
+std::mutex mtx;
+
+std::random_device rd; 
+std::mt19937 gen(rd());
+
+double random_duration(double min, double max) {
+    std::uniform_real_distribution<double> dist(min, max);
+    return dist(gen);
+}
 
 enum class Mode {
     Normal, 
@@ -31,10 +38,12 @@ struct FailureRequest {
     double failure_duration; 
     ros::Time last_request; 
 
-    FailureRequest(std::string input, double duration) {
+    FailureRequest(std::string input) {
         if (input == "short") {
+            failure_duration = random_duration(2.0, 5.0); 
             mode = Mode::Short_Dropout;
         } else if (input == "long") {
+            failure_duration = random_duration(10.0, 30.0); 
             mode = Mode::Long_Dropout;
         } else if (input == "short_burst") {
             mode = Mode::Burst_Short_Dropout;
@@ -48,12 +57,11 @@ struct FailureRequest {
             mode = Mode::Normal;
         }
 
-        failure_duration = duration; 
         last_request = ros::Time::now();
     }
 };
 
-FailureRequest failure_request("normal", 0.0); 
+FailureRequest failure_request("normal"); 
 std::atomic<bool> incoming_request(false); 
 
 // callback that saves the current state of the autopilot 
@@ -83,14 +91,9 @@ void terminal_thread() {
         if (ss >> input) {
             if (input == "quit") {
                 ros::shutdown();
-            }
-            std::lock_guard<std::mutex> lock(mtx);
-            if (ss >> duration) {
-                failure_request = FailureRequest(input, duration);
-                incoming_request = true; 
-            }
-            else {
-                failure_request = FailureRequest(input, 0.0);
+            } else {
+                std::lock_guard<std::mutex> lock(mtx);  
+                failure_request = FailureRequest(input);
                 incoming_request = true; 
             }
         } else {
@@ -100,9 +103,8 @@ void terminal_thread() {
 }
 
 int main(int argc, char **argv) {
-    // starts ros node
+
     ros::init(argc, argv, "failure_sim_node");
-    // node's access point to ros
     ros::NodeHandle nh;
 
     // runs the terminal input function in a seperate thread to not block the ROS loop
@@ -119,9 +121,6 @@ int main(int argc, char **argv) {
     ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("offboard_control/intermediate_pose_setpoint", 10);
     
-    // setpoint publishing rate must be faster than 2 Hz 
-    // PX4 has a timeout of 500 ms between two offboard commands, and fall backs to the last mode if timeout is exceeded 
-    // recommended to enter offboard mode from position mode
     ros::Rate rate(20.0);
 
     // std::vector<geometry_msgs::PoseStamped> waypoints = {
@@ -130,72 +129,47 @@ int main(int argc, char **argv) {
     // };
 
     Mode current_mode;
+    double current_duration; 
+    ros::Time last_request; 
     ROS_INFO("failure simulation setting up...");
 
     while(ros::ok()) {
         if (incoming_request) {  
+            ROS_INFO("processing request...");
             std::lock_guard<std::mutex> lock(mtx);  
             current_mode = failure_request.mode; 
+            current_duration = failure_request.failure_duration; 
+            last_request = failure_request.last_request; 
             incoming_request = false; 
-        } 
-        else {
-            current_mode = Mode::Normal; 
         }
         switch (current_mode) {
             case Mode::Normal: 
                 intermediate_pose_pub.publish(current_pose);
                 intermediate_state_pub.publish(current_state);
                 break;
+            // in dropouts, intentionally publish nothing
             case Mode::Short_Dropout: 
-                // offboard_set_mode.request.custom_mode = "OFFBOARD";
-                // arm_cmd.request.value = true; 
-
-                // // wait for connection to be established between mavros and the autopilot 
-                // // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
-                // while(ros::ok() && !current_state.connected) {
-                //     // lets ros process callbacks once to update current_state
-                //     ros::spinOnce();
-                //     rate.sleep();
-                // }
-
-                // // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
-                // // 100 messages across 5 seconds before requesting offboard 
-                // for (int i = 100; ros::ok() && i > 0; --i) {
-                //     local_pos_pub.publish(waypoints[mode_index]);
-                //     ros::spinOnce();
-                //     rate.sleep();
-                // }
-
-                // current_mode = Mode::Offboard;
-                // ROS_INFO("offboarding...");
+                if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
+                    ROS_INFO("short dropout complete, returning manual...");
+                    current_mode = Mode::Normal; 
+                }
                 break;
             case Mode::Long_Dropout: 
-                intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
+                if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
+                    ROS_INFO("long dropout complete, returning manual...");
+                    current_mode = Mode::Normal; 
+                }
                 break;
             case Mode::Burst_Short_Dropout: 
-                intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
                 break;
             case Mode::Burst_Long_Dropout: 
-                intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
                 break;
             case Mode::Command_Degradation: 
-                intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
                 break;
             case Mode::State_Degradation: 
-                intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
                 break;
         }
-        // if (mode_index < waypoints.size()) {
-        //     // continue sending the requested pose at the appropriate rate 
-        //     // interpolation set at 5cm / tick (1 m/s)
-        //     command_pose = interpolation(command_pose, waypoints[mode_index], 0.05);
-        // }
-        //keeps the loop at 20 Hz
+
         ros::spinOnce();
         rate.sleep();
     }

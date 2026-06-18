@@ -10,7 +10,8 @@
 #include <vector>
 #include <limits>
 
-
+const int FIRST_WAYPOINT_INDEX = 3; // exclude offboard protocols
+const int LAST_WAYPOINT_INDEX = 7; // exclude halt
 // FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
 enum class Mode {
     Init, 
@@ -24,6 +25,7 @@ enum class Mode {
     Halt
 };
 
+// tune watchdog parameters based on hardware
 struct Watchdog {
     //fields 
     int consecutive_feeds = 0; 
@@ -32,7 +34,7 @@ struct Watchdog {
     bool trigger = false; 
     double warn_timeout; 
     double trigger_timeout; 
-    int feed_threshold = 4; 
+    int feed_threshold = 4 * 2; // multiply by two to account for feed() for both state & pose 
 
     // constructor 
     Watchdog(double warn_time=0.4, double trigger_time=0.8) {
@@ -125,12 +127,12 @@ geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geo
 }
 
 int find_waypoint(geometry_msgs::PoseStamped current, std::vector<MachineState> states) {
-    int index = 3; 
+    int index = FIRST_WAYPOINT_INDEX; 
 
     double minimum_d = std::numeric_limits<double>::max();
-    int n = states.size() - 1; 
+    int n = LAST_WAYPOINT_INDEX; 
     // temporarily hard coded 
-    for (int i = 3; i < n; i++) {
+    for (int i = FIRST_WAYPOINT_INDEX; i < n; i++) {
         double dx = states[i].pose.pose.position.x - current.pose.position.x;
         double dy = states[i].pose.pose.position.y - current.pose.position.y;
         double dz = states[i].pose.pose.position.z - current.pose.position.z;
@@ -221,7 +223,7 @@ int main(int argc, char **argv) {
     
     ROS_INFO("initializing...");
     Mode current_mode = Mode::Init;
-    geometry_msgs::PoseStamped command_pose = current_pose;
+    geometry_msgs::PoseStamped command_pose = states[0].pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
@@ -255,7 +257,7 @@ int main(int argc, char **argv) {
                 local_pos_pub.publish(current_pose);
                 pose_watchdog.tick();
 
-                if (received_pose && !pose_watchdog.is_healthy()) {
+                if (received_pose && pose_watchdog.is_healthy()) {
                     ROS_INFO("offboarding...");
                     mode_index += 1; 
                     current_mode = Mode::Offboard;
