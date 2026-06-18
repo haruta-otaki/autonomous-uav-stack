@@ -19,8 +19,6 @@ mavros_msgs/State.h
 -
 string
 -
-array
--
 vector
 -
 limits

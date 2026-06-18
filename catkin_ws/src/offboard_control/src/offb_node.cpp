@@ -10,6 +10,20 @@
 #include <vector>
 #include <limits>
 
+
+// FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
+enum class Mode {
+    Init, 
+    Prestream, 
+    Offboard, 
+    Waypoint_0,
+    Waypoint_1,
+    Waypoint_2,
+    Waypoint_3,
+    Land,
+    Halt
+};
+
 struct Watchdog {
     //fields 
     int consecutive_feeds = 0; 
@@ -69,19 +83,6 @@ struct MachineState {
 
         mode = m; 
     }
-};
-
-// FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
-enum class Mode {
-    Init, 
-    Prestream, 
-    Offboard, 
-    Waypoint_0,
-    Waypoint_1,
-    Waypoint_2,
-    Waypoint_3,
-    Land,
-    Halt
 };
 
 // global variables

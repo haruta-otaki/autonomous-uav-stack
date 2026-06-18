@@ -6,11 +6,55 @@
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 
-#include <string>
-#include <array>
-#include <vector>
 
-double TOL = 0.3; 
+#include <string>
+#include <vector>
+#include <atomic>
+#include <thread>
+#include <iostream>
+#include <mutex>
+
+std::mutex mtx; 
+
+enum class Mode {
+    Normal, 
+    Short_Dropout,
+    Long_Dropout,
+    Burst_Short_Dropout,
+    Burst_Long_Dropout,
+    Command_Degradation,
+    State_Degradation
+};
+
+struct FailureRequest {
+    Mode mode; 
+    double failure_duration; 
+    ros::Time last_request; 
+
+    FailureRequest(std::string input, double duration) {
+        if (input == "short") {
+            mode = Mode::Short_Dropout;
+        } else if (input == "long") {
+            mode = Mode::Long_Dropout;
+        } else if (input == "short_burst") {
+            mode = Mode::Burst_Short_Dropout;
+        } else if (input == "long_burst") {
+            mode = Mode::Burst_Long_Dropout;
+        } else if (input == "command") {
+            mode = Mode::Command_Degradation;
+        } else if (input == "state") {
+            mode = Mode::State_Degradation;
+        } else {
+            mode = Mode::Normal;
+        }
+
+        failure_duration = duration; 
+        last_request = ros::Time::now();
+    }
+};
+
+FailureRequest failure_request("normal", 0.0); 
+std::atomic<bool> incoming_request(false); 
 
 // callback that saves the current state of the autopilot 
 mavros_msgs::State current_state; 
@@ -23,66 +67,46 @@ void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
 }
 
-
-// geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geometry_msgs::PoseStamped target, double step) {
-//     double dx = target.pose.position.x - current.pose.position.x;
-//     double dy = target.pose.position.y - current.pose.position.y;
-//     double dz = target.pose.position.z - current.pose.position.z;
-//     double d =  std::sqrt(dx * dx + dy * dy + dz * dz);
-//     geometry_msgs::PoseStamped next_pose;
-//     // set orientation (w) to 1.0 as, otherwise, it initializes an invalid, zero quaternion (0,0,0,0) for the pose
-//     next_pose.pose.orientation.w = 1.0; 
-
-//     if (d < step) {
-//         next_pose.pose.position = target.pose.position; 
-//     } else {
-//         next_pose.pose.position.x = current.pose.position.x + dx * (step / d); 
-//         next_pose.pose.position.y = current.pose.position.y + dy * (step / d); 
-//         next_pose.pose.position.z = current.pose.position.z + dz * (step / d); 
-//     }
-//     return next_pose;
-// }
-
-// geometry_msgs::PoseStamped make_pose(double x, double y, double z) {
-//     // PX4 flight stack operates in NED coordinate frame but mavros translates them to standard ENU frame 
-//     // target position that is consistently sent to px4 (it expects continous commands)
-//     // poseStamped: postition+orientation+timeframe
-//     // NED: x: North, y: East, z: Down
-//     // ENU: x: East, y: North, z: Up
-//     geometry_msgs::PoseStamped pose;
-//     pose.pose.position.x = x; 
-//     pose.pose.position.y = y; 
-//     pose.pose.position.z = z; 
-//     pose.pose.orientation.w = 1.0; 
-//     return pose;
-// }
-
-// bool at_waypoint(geometry_msgs::PoseStamped target_pose, double tol) {
-//     double dx = target_pose.pose.position.x - current_pose.pose.position.x;
-//     double dy = target_pose.pose.position.y - current_pose.pose.position.y;
-//     double dz = target_pose.pose.position.z - current_pose.pose.position.z;
-//     return std::sqrt(dx * dx + dy * dy + dz * dz) < tol;
-// }
-
-// bool vehicle_stability() {
-//     return current_state.connected && current_state.mode == "OFFBOARD" && current_state.armed;
-// }
-
-enum class Mode {
-    Normal, 
-    Short_Dropout,
-    Long_Dropout,
-    Burst_Short_Dropout,
-    Burst_Long_Dropout,
-    Command_Degradation,
-    State_Degradation
-};
+void terminal_thread() {
+    std::string input; 
+    // safe, incomparison to traditional cin as character input stream (cin), seperates at whitespace
+    std::string line; 
+    double duration; 
+    while (ros::ok()) {
+        // character output stream 
+        // << : insertion operator 
+        // >> : extraction operator
+        std::cout << "Command> " << std::flush; 
+        std::getline(std::cin, line);
+        std::stringstream ss(line);
+        
+        if (ss >> input) {
+            if (input == "quit") {
+                ros::shutdown();
+            }
+            std::lock_guard<std::mutex> lock(mtx);
+            if (ss >> duration) {
+                failure_request = FailureRequest(input, duration);
+                incoming_request = true; 
+            }
+            else {
+                failure_request = FailureRequest(input, 0.0);
+                incoming_request = true; 
+            }
+        } else {
+            incoming_request = false; 
+        }
+    }
+}
 
 int main(int argc, char **argv) {
     // starts ros node
     ros::init(argc, argv, "failure_sim_node");
     // node's access point to ros
     ros::NodeHandle nh;
+
+    // runs the terminal input function in a seperate thread to not block the ROS loop
+    std::thread input_thread(terminal_thread);
 
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
@@ -94,11 +118,6 @@ int main(int argc, char **argv) {
 
     ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("offboard_control/intermediate_pose_setpoint", 10);
-
-    // ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
-    //     ("mavros/cmd/arming");
-    // ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
-    //     ("mavros/set_mode");
     
     // setpoint publishing rate must be faster than 2 Hz 
     // PX4 has a timeout of 500 ms between two offboard commands, and fall backs to the last mode if timeout is exceeded 
@@ -110,29 +129,24 @@ int main(int argc, char **argv) {
     //     make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
     // };
 
-    // int mode_index = 0;
-
-    // mavros_msgs::SetMode offboard_set_mode; 
-    // mavros_msgs::SetMode land_set_mode; 
-
-    // mavros_msgs::SetMode manual_set_mode; 
-
-    // mavros_msgs::CommandBool arm_cmd; 
-
-    // geometry_msgs::PoseStamped command_pose = waypoints[0];
-
-    // ros::Time last_request = ros::Time::now();
-    // ros::Time dwell_start_time = ros::Time::now();
-
-
-    // bool dwelling = false; 
-    
-    Mode current_mode = Mode::Normal;
+    Mode current_mode;
     ROS_INFO("failure simulation setting up...");
 
     while(ros::ok()) {
+        if (incoming_request) {  
+            std::lock_guard<std::mutex> lock(mtx);  
+            current_mode = failure_request.mode; 
+            incoming_request = false; 
+        } 
+        else {
+            current_mode = Mode::Normal; 
+        }
         switch (current_mode) {
             case Mode::Normal: 
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
+            case Mode::Short_Dropout: 
                 // offboard_set_mode.request.custom_mode = "OFFBOARD";
                 // arm_cmd.request.value = true; 
 
@@ -152,27 +166,30 @@ int main(int argc, char **argv) {
                 //     rate.sleep();
                 // }
 
-                // // handleMode(current_mode);
-                // mode_index += 1; 
                 // current_mode = Mode::Offboard;
                 // ROS_INFO("offboarding...");
+                break;
+            case Mode::Long_Dropout: 
                 intermediate_pose_pub.publish(current_pose);
                 intermediate_state_pub.publish(current_state);
                 break;
-            // case Mode::Halt: 
-            //     land_set_mode.request.custom_mode = "AUTO.LAND";
-            //     if (current_state.mode != "AUTO.LAND" && 
-            //     (ros::Time::now() - last_request > ros::Duration(5.0))) {
-            //         // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-            //         if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
-            //             ROS_INFO("landing enabled");
-            //         }
-            //         last_request = ros::Time::now();
-            //     } 
-                   
-            //     break;
+            case Mode::Burst_Short_Dropout: 
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
+            case Mode::Burst_Long_Dropout: 
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
+            case Mode::Command_Degradation: 
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
+            case Mode::State_Degradation: 
+                intermediate_pose_pub.publish(current_pose);
+                intermediate_state_pub.publish(current_state);
+                break;
         }
-
         // if (mode_index < waypoints.size()) {
         //     // continue sending the requested pose at the appropriate rate 
         //     // interpolation set at 5cm / tick (1 m/s)
@@ -181,6 +198,12 @@ int main(int argc, char **argv) {
         //keeps the loop at 20 Hz
         ros::spinOnce();
         rate.sleep();
+    }
+
+    // safe shutdown logic 
+    if (input_thread.joinable()) {
+        // waits for input_thread to finish (a thread may only be joined once)
+        input_thread.join();
     }
     return 0; 
 }
