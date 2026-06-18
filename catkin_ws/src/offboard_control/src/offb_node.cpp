@@ -26,6 +26,8 @@ enum class Mode {
 };
 
 // tune watchdog parameters based on hardware
+// only tracking pose, as state is necessary for changing modes 
+// ^ will be modified when communication delays are simulated in the actuall communication between QGC and PX4 
 struct Watchdog {
     //fields 
     int consecutive_feeds = 0; 
@@ -34,13 +36,13 @@ struct Watchdog {
     bool trigger = false; 
     double warn_timeout; 
     double trigger_timeout; 
-    int feed_threshold = 4 * 2; // multiply by two to account for feed() for both state & pose 
+    int feed_threshold = 4;
 
     // constructor 
     Watchdog(double warn_time=0.4, double trigger_time=0.8) {
         warn_timeout = warn_time;
         trigger_timeout = trigger_time;
-        last_cb = ros::Time::now();
+        last_cb = ros::Time(0);
     }
 
     // methods
@@ -181,7 +183,7 @@ int main(int argc, char **argv) {
 
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
-        ("offboard_control/intermediate_state_setpoint", 10, state_cb);
+        ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("offboard_control/intermediate_pose_setpoint", 10, pose_cb);
         
@@ -257,7 +259,7 @@ int main(int argc, char **argv) {
                 local_pos_pub.publish(current_pose);
                 pose_watchdog.tick();
 
-                if (received_pose && pose_watchdog.is_healthy()) {
+                if (received_pose && !pose_watchdog.is_healthy()) {
                     ROS_INFO("offboarding...");
                     mode_index += 1; 
                     current_mode = Mode::Offboard;
@@ -371,6 +373,11 @@ int main(int argc, char **argv) {
             // interpolation set at 5cm / tick (1 m/s)
             command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
             local_pos_pub.publish(command_pose);
+        }
+        if (pose_watchdog.is_healthy()) {
+            current_mode = Mode::Prestream;
+            mode_index = 1; 
+            ROS_INFO_THROTTLE(4.0, "prestreaming...");
         }
         //keeps the loop at 20 Hz
         ros::spinOnce();

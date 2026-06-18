@@ -40,9 +40,11 @@ struct FailureRequest {
 
     FailureRequest(std::string input) {
         if (input == "short") {
+            ROS_INFO("short dropout...");
             failure_duration = random_duration(2.0, 5.0); 
             mode = Mode::Short_Dropout;
         } else if (input == "long") {
+            ROS_INFO("short dropout...");
             failure_duration = random_duration(10.0, 30.0); 
             mode = Mode::Long_Dropout;
         } else if (input == "short_burst") {
@@ -56,19 +58,18 @@ struct FailureRequest {
         } else {
             mode = Mode::Normal;
         }
-
-        last_request = ros::Time::now();
     }
 };
 
 FailureRequest failure_request("normal"); 
 std::atomic<bool> incoming_request(false); 
+std::atomic<Mode> current_mode(Mode::Normal);
 
 // callback that saves the current state of the autopilot 
-mavros_msgs::State current_state; 
-void state_cb(const mavros_msgs::State::ConstPtr& msg){
-    current_state = *msg;
-}
+// mavros_msgs::State current_state; 
+// void state_cb(const mavros_msgs::State::ConstPtr& msg){
+//     current_state = *msg;
+// }
 
 geometry_msgs::PoseStamped current_pose; 
 void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
@@ -91,6 +92,8 @@ void terminal_thread() {
         if (ss >> input) {
             if (input == "quit") {
                 ros::shutdown();
+            } else if (current_mode != Mode::Normal) {
+                ROS_ERROR("previous failure mode is still running");
             } else {
                 std::lock_guard<std::mutex> lock(mtx);  
                 failure_request = FailureRequest(input);
@@ -110,8 +113,8 @@ int main(int argc, char **argv) {
     // runs the terminal input function in a seperate thread to not block the ROS loop
     std::thread input_thread(terminal_thread);
 
-    ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
-        ("mavros/state", 10, state_cb);
+    // ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
+    //     ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("mavros/local_position/pose", 10, pose_cb);
     
@@ -128,9 +131,8 @@ int main(int argc, char **argv) {
     //     make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
     // };
 
-    Mode current_mode;
-    double current_duration; 
-    ros::Time last_request; 
+    double current_duration = 0.0; 
+    ros::Time last_request = ros::Time::now(); 
     ROS_INFO("failure simulation setting up...");
 
     while(ros::ok()) {
@@ -139,24 +141,28 @@ int main(int argc, char **argv) {
             std::lock_guard<std::mutex> lock(mtx);  
             current_mode = failure_request.mode; 
             current_duration = failure_request.failure_duration; 
-            last_request = failure_request.last_request; 
+            failure_request.last_request = ros::Time::now();
+            last_request = ros::Time::now(); 
             incoming_request = false; 
         }
         switch (current_mode) {
             case Mode::Normal: 
+                ROS_INFO_THROTTLE(4.0, "manual control...");
                 intermediate_pose_pub.publish(current_pose);
-                intermediate_state_pub.publish(current_state);
+                // intermediate_state_pub.publish(current_state);
                 break;
             // in dropouts, intentionally publish nothing
             case Mode::Short_Dropout: 
+                ROS_INFO_THROTTLE(1.0, "performing short dropout...");
                 if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
-                    ROS_INFO("short dropout complete, returning manual...");
+                    ROS_INFO("short dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
-            case Mode::Long_Dropout: 
+            case Mode::Long_Dropout:
+                ROS_INFO_THROTTLE(1.0, "performing short dropout...");
                 if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
-                    ROS_INFO("long dropout complete, returning manual...");
+                    ROS_INFO("long dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
@@ -169,7 +175,6 @@ int main(int argc, char **argv) {
             case Mode::State_Degradation: 
                 break;
         }
-
         ros::spinOnce();
         rate.sleep();
     }
