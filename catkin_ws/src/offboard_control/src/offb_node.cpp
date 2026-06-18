@@ -216,6 +216,7 @@ int main(int argc, char **argv) {
 
     mavros_msgs::SetMode offboard_set_mode; 
     mavros_msgs::SetMode land_set_mode; 
+    mavros_msgs::SetMode manual_set_mode; 
 
     ros::Time last_request = ros::Time::now();
     ros::Time dwell_start_time = ros::Time::now();
@@ -374,7 +375,16 @@ int main(int argc, char **argv) {
             command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
             local_pos_pub.publish(command_pose);
         }
-        if (pose_watchdog.is_healthy()) {
+        if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream) {
+            manual_set_mode.request.custom_mode = "POSCTL";
+            if (current_state.mode != "POSCTL" && 
+            (ros::Time::now() - last_request > ros::Duration(5.0))) {
+                // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
+                if (set_mode_client.call(manual_set_mode) && manual_set_mode.response.mode_sent) {
+                    ROS_INFO("manual control enabled");
+                }
+                last_request = ros::Time::now();
+            } 
             current_mode = Mode::Prestream;
             mode_index = 1; 
             ROS_INFO_THROTTLE(4.0, "prestreaming...");

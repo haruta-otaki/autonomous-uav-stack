@@ -44,7 +44,7 @@ struct FailureRequest {
             failure_duration = random_duration(2.0, 5.0); 
             mode = Mode::Short_Dropout;
         } else if (input == "long") {
-            ROS_INFO("short dropout...");
+            ROS_INFO("long dropout...");
             failure_duration = random_duration(10.0, 30.0); 
             mode = Mode::Long_Dropout;
         } else if (input == "short_burst") {
