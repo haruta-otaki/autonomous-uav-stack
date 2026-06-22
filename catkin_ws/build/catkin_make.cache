@@ -1,2 +1,0 @@
-failure_sim:offboard_control
--DCATKIN_DEVEL_PREFIX=/home/w220501/autonomous_drone/catkin_ws/devel -DCMAKE_INSTALL_PREFIX=/home/w220501/autonomous_drone/catkin_ws/install -G Unix Makefiles

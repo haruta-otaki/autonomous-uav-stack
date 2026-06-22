@@ -52,7 +52,7 @@
         <arg name="respawn_mavros" value="$(arg respawn_mavros)"/>
     </include>
     <!-- rosbag -->
-    <!-- <node 
+    <node 
         pkg="rosbag"
         type="record"
         name="rosbag_record"
@@ -71,5 +71,5 @@
             /mavros/extended_state
             /tf
             /tf_static
-            /rosout"/> -->
+            /rosout"/>
 </launch>

@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
                 }
                 break;
             case Mode::Long_Dropout:
-                ROS_INFO_THROTTLE(1.0, "performing short dropout...");
+                ROS_INFO_THROTTLE(1.0, "performing long dropout...");
                 if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
                     ROS_INFO("long dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 

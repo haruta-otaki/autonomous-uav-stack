@@ -1,8 +1,0 @@
-prefix=/home/w220501/autonomous_drone/catkin_ws/devel
-
-Name: offboard_control
-Description: Description of offboard_control
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
