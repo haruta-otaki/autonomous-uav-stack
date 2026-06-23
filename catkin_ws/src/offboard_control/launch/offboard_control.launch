@@ -1,3 +1,4 @@
+<!-- built on default PX4 SITL + MAVROS launch file -->
 <?xml version="1.0"?>
 <launch>
     <!-- MAVROS posix SITL environment launch script -->
@@ -51,13 +52,19 @@
         <arg name="fcu_url" value="$(arg fcu_url)"/>
         <arg name="respawn_mavros" value="$(arg respawn_mavros)"/>
     </include>
+
+    <!-- parameters -->
+    <arg name="trial_id"/> 
+    <arg name="failure_mode"/> 
+    <arg name="fallback_mode"/> 
     <!-- rosbag -->
+    <!-- pkg: catkin package name, type: executable name, name: custom name of choice (for rosnode) -->
     <node 
         pkg="rosbag"
         type="record"
         name="rosbag_record"
         output="screen"
-        args="-o $(find offboard_control)/bags/flight
+        args="-o $(find offboard_control)/bags/trial_$(arg trial_id)_$(arg failure_mode)_$(arg fallback_mode)
             /mavros/state
             /mavros/local_position/pose
             /mavros/local_position/velocity_local
@@ -72,4 +79,10 @@
             /tf
             /tf_static
             /rosout"/>
+    <!-- pass parameters to metrics node -->
+    <node pkg="metrics" type="metrics_node" name="metrics_node" output="screen">
+        <param name="trial_id" value="$(arg trial_id)"/>
+        <param name="failure_mode" value="$(arg failure_mode)"/>
+        <param name="fallback_mode" value="$(arg fallback_mode)"/>
+    <node/>
 </launch>

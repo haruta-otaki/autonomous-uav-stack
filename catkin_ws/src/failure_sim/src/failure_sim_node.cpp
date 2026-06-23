@@ -147,6 +147,7 @@ int main(int argc, char **argv) {
         }
         switch (current_mode) {
             case Mode::Normal: 
+            // prints every x seconds
                 ROS_INFO_THROTTLE(4.0, "manual control...");
                 intermediate_pose_pub.publish(current_pose);
                 // intermediate_state_pub.publish(current_state);
