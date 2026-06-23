@@ -6,6 +6,8 @@
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 
+#include <sensor_msgs/BatteryState.h>
+
 #include <string>
 #include <vector>
 #include <limits>
@@ -94,6 +96,7 @@ bool received_pose = false;
 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
+sensor_msgs::BatteryState current_battery; 
 Watchdog pose_watchdog(0.4, 0.8);
 
 // callback that saves the current state of the autopilot 
@@ -105,6 +108,10 @@ void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
     received_pose = true; 
     pose_watchdog.feed();
+}
+
+void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
+    current_battery = *msg;
 }
 
 
@@ -186,10 +193,19 @@ int main(int argc, char **argv) {
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("offboard_control/intermediate_pose_setpoint", 10, pose_cb);
+       
+    ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
+        ("mavros/battery", 10, battery_cb);
         
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("mavros/setpoint_position/local", 10);
+
+    ros::Publisher intermediate_battery_pub = nh.advertise<sensor_msgs::BatteryState> 
+        ("metrics/intermediate_battery", 10);
+
+    // ros::Publisher intermediate_mode_pub = nh.advertise<std::string> 
+    //     ("metrics/intermediate_mode", 10);
 
     // clients that request arming and mode changes
     // mavros prefix depend on the name given to the node in .launch file
@@ -389,6 +405,8 @@ int main(int argc, char **argv) {
             mode_index = 1; 
             ROS_INFO_THROTTLE(4.0, "prestreaming...");
         }
+        intermediate_battery_pub.publish(current_battery);
+        // intermediate_mode_pub.publish("OFFBOARD");
         //keeps the loop at 20 Hz
         ros::spinOnce();
         rate.sleep();

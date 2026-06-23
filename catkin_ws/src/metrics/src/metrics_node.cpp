@@ -5,6 +5,8 @@
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 
+#include <sensor_msgs/BatteryState.h>
+
 #include <string>
 #include <vector>
 #include <fstream>
@@ -31,6 +33,16 @@ void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
 }
 
+sensor_msgs::BatteryState current_battery; 
+void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
+    current_battery = *msg;
+}
+
+// sensor_msgs::BatteryState current_failure_mode; 
+// void mode_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
+//     current_failure_mode = *msg;
+// }
+
 void log(std::string filename, std::string description, double data) {
     std::ofstream file(filename, std::ios::app); 
     file << description << ": " << data << "\n";
@@ -47,7 +59,11 @@ int main(int argc, char **argv) {
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("mavros/local_position/pose", 10, pose_cb);
-    
+    ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
+        ("metrics/intermediate_battery", 10, battery_cb);
+    // ros::Subscriber mode_sub = nh.subscribe<std::string>
+    //     ("metrics/intermediate_mode", 10, mode_cb);
+
     ros::Publisher intermediate_state_pub = nh.advertise<mavros_msgs::State> 
         ("offboard_control/intermediate_state_setpoint", 10);
 
