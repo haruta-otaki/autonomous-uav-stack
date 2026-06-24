@@ -102,12 +102,6 @@ int main(int argc, char **argv) {
         ("metrics/intermediate_battery", 10, battery_cb);
     // ros::Subscriber mode_sub = nh.subscribe<std::string>
     //     ("metrics/intermediate_mode", 10, mode_cb);
-
-    ros::Publisher intermediate_state_pub = nh.advertise<mavros_msgs::State> 
-        ("offboard_control/intermediate_state_setpoint", 10);
-
-    ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
-        ("offboard_control/intermediate_pose_setpoint", 10);
     
     // read parameters from launch file 
     int trial_id; 
