@@ -11,17 +11,58 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 
-struct FailureRequest {
-    // Mode mode; 
-    double failure_duration; 
-    ros::Time last_request; 
-
-    FailureRequest(std::string input) {
-    }
+enum class LogType {
+    Normal, 
+    Short_Dropout,
+    Long_Dropout,
+    Burst_Short_Dropout,
+    Burst_Long_Dropout,
+    Command_Degradation,
+    State_Degradation
 };
 
-FailureRequest failure_request("normal"); 
+class MetricsLogger {
+    // make file a member variable (attribute) in MetricLogger class such that it is accessible by any function within that same class
+    // unlike local variables that only exist inside a single function, preventing reopening and closing the file at each write
+    std::ofstream file; 
+    double flush_rate;
+    ros::Time last_log = ros::Time(0.0);
+    ros::Time creation_time;
+    bool creation = false; 
+
+public: 
+    MetricsLogger(const std::string& file_path, double rate) {
+        creation = true;
+        creation_time = ros::Time::now();
+        flush_rate = rate; 
+        file.open(file_path);
+        // columns
+        file <<  "time,event,mode,x,y,z,battery,details\n";
+        ROS_INFO("[METRICS] logging...");
+    }
+
+    void write(const std::string& event, const std::string& mode, const geometry_msgs::PoseStamped& pose,
+            const sensor_msgs::BatteryState& battery, const std::string& details = "") {
+        double elapsed_time = (ros::Time::now() - creation_time).toSec();
+
+        // allows entries of decimals with fixed point notation up to 3 decimal points
+        file << std::fixed << std::setprecision(3)
+            << elapsed_time                               << ","
+            << event                                      << ","
+            << mode                                       << ","
+            << pose.pose.position.x                       << ","
+            << pose.pose.position.y                       << ","
+            << pose.pose.position.z                       << ","
+            << battery.percentage                         << ","
+            << details                                    << "\n";
+        if ((ros::Time::now() - last_log).toSec() > flush_rate) {
+            file.flush(); 
+            last_log = ros::Time::now();
+        } 
+    }
+};
 
 mavros_msgs::State current_state; 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -53,8 +94,6 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "metrics_node");
     ros::NodeHandle nh;
 
-    // std::thread input_thread(terminal_thread);
-
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
@@ -70,83 +109,71 @@ int main(int argc, char **argv) {
     ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("offboard_control/intermediate_pose_setpoint", 10);
     
+    // read parameters from launch file 
+    int trial_id; 
+    std::string failure_mode; 
+    std::string fallback_mode; 
+    std::string metrics_path; 
+    nh.param("trial_id", trial_id);
+    nh.param("failure_mode", failure_mode);
+    nh.param("fallback_mode", fallback_mode);
+    nh.param("metrics_path", metrics_path);
+
     ros::Rate rate(20.0);
 
-    //enter number here 
     std::stringstream ss;
-    int id = 0;
-    ss << "metrics" << id << ".csv";
-    std::string filename = ss.str();
-    std::ofstream csvFile(filename);
+    ss << metrics_path << "/logs/" 
+    << "trial_" << trial_id 
+    << "_" << failure_mode 
+    << "_" << fallback_mode 
+    << ".csv";
+    MetricsLogger logger(ss.str(), 4.0);
 
-    // std::vector<geometry_msgs::PoseStamped> waypoints = {
-    //     make_pose(0.0, 0.0, 2.0), make_pose(0.0, 0.0, 2.0), make_pose(0.0, 9.5, 2.0), make_pose(-15.0, 9.5, 2.0), 
-    //     make_pose(-15.0, 15.0, 2.0), make_pose(-15.0, 15.0, 0.3), make_pose(-15.0, 15.0, 0.3) 
-    // };
-
-    double current_duration = 0.0; 
-    ros::Time last_request = ros::Time::now(); 
     ROS_INFO("failure simulation setting up...");
 
-    ros::Time mission_start_time;
-    ros::Time mission_end_time;
-    ros::Time failure_start_time;
-    ros::Time failure_end_time;
+    ros::Time failure_time;
     double failure_duration;
 
     bool takeoff = false; 
     bool land = false; 
+    bool failure_start = false;
+    bool failure_end = false;
+    std::string current_mode; 
     std::string last_mode; 
-            std::string description;
+
 
     while(ros::ok()) {
-        if (current_state.mode == "AUTO.TAKEOFF" && !takeoff) {
-            mission_start_time = ros::Time::now();
-            description = "mission start time";
-            log(filename, description, mission_start_time.toSec());
-        } else if (current_state.mode == "AUTO.Land" && !land) {
-            mission_end_time = ros::Time::now();
-            description = "mission end time";
-            log(filename, description, mission_end_time.toSec());
+        current_mode = current_state.mode; 
+        failure_start = current_mode == "OFFBOARD" && last_mode != "OFFBOARD"; 
+        failure_end = last_mode == "OFFBOARD" && (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL");
+        if (current_mode == "AUTO.TAKEOFF" && !takeoff) {
+            logger.write("Mission Start", current_mode, current_pose, current_battery, "");
+            takeoff = true;
+        } else if (current_mode == "AUTO.LAND" && !land) {
+            logger.write("Mission Complete", current_mode, current_pose, current_battery, "");
+            land = true; 
         }
-        else if (current_state.mode == "AUTO.LOITER" || current_state.mode == "POSTCTL") {
-            if (last_mode != "AUTO.LOITER" || last_mode != "POSTCTL") {
-                failure_end_time = ros::Time::now();
-                description = "failure end time";
-                log(filename, description, failure_end_time.toSec());
-                failure_duration = failure_end_time.toSec() - failure_start_time.toSec();
-                description = "failure duration";
-                log(filename, description, failure_duration);             
+        else if (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL") {
+            if (failure_end) {
+                failure_duration = (ros::Time::now() - failure_time).toSec();
+                std::stringstream detail;
+                ss << std::fixed << std::setprecision(3) 
+                << "Fallback: " << ","
+                << "Duration: " << failure_duration;
+                MetricsLogger logger(ss.str(), 4.0);
+                logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
             }
         } else {
-            if (last_mode == "AUTO.LOITER" || last_mode == "POSTCTL") {
-                failure_start_time = ros::Time::now();
-                description = "failure start time";
-                log(filename, description, failure_start_time.toSec());
+            if (failure_start) {
+                failure_time = ros::Time::now();
+                // receive custom ros message for fallback mode
+                logger.write("Failure Start", current_mode, current_pose, current_battery, "");
             }
         }
-        // if (incoming_request) {  
-        //     ROS_INFO("processing request...");
-        //     std::lock_guard<std::mutex> lock(mtx);  
-        //     current_mode = failure_request.mode; 
-        //     current_duration = failure_request.failure_duration; 
-        //     failure_request.last_request = ros::Time::now();
-        //     last_request = ros::Time::now(); 
-        //     incoming_request = false; 
-        // }
-        // switch (current_mode) {
-        //     case Mode::Normal: 
-        //         ROS_INFO_THROTTLE(4.0, "manual control...");
-        //         intermediate_pose_pub.publish(current_pose);
-        //         // intermediate_state_pub.publish(current_state);
-        //         break;
-        // }
+        last_mode = current_mode;
         ros::spinOnce();
         rate.sleep();
     }
 
-    // if (input_thread.joinable()) {
-    //     input_thread.join();
-    // }
     return 0; 
 }

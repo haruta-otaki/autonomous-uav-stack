@@ -84,5 +84,6 @@
         <param name="trial_id" value="$(arg trial_id)"/>
         <param name="failure_mode" value="$(arg failure_mode)"/>
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
+        <param name="metrics_path" value="$(find metrics)"/>
     <node/>
 </launch>

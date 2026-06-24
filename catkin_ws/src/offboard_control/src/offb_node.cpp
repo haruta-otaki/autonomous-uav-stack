@@ -61,12 +61,12 @@ struct Watchdog {
         if (!warn && ros::Time::now() - last_cb > ros::Duration(warn_timeout)) {
             consecutive_feeds = 0; 
             warn = true; 
-            ROS_WARN("Watchdog: no pose received, monitoring...");
+            ROS_WARN("[OFFB_NODE] Watchdog: no pose received, monitoring...");
         }
         if (!trigger && ros::Time::now() - last_cb > ros::Duration(trigger_timeout)) {
             consecutive_feeds = 0; 
             trigger = true; 
-            ROS_ERROR("Watchdog: communication loss detected, trigerring offboard...");
+            ROS_ERROR("[OFFB_NODE] Watchdog: communication loss detected, trigerring offboard...");
         }
     }
 
@@ -240,7 +240,7 @@ int main(int argc, char **argv) {
     // currently unused 
     mavros_msgs::CommandBool arm_cmd; 
     
-    ROS_INFO("initializing...");
+    ROS_INFO("[OFFB_NODE] initializing...");
     Mode current_mode = Mode::Init;
     geometry_msgs::PoseStamped command_pose = states[0].pose;
 
@@ -270,14 +270,14 @@ int main(int argc, char **argv) {
                 // handleMode(current_mode);
                 mode_index += 1; 
                 current_mode = Mode::Prestream;
-                ROS_INFO("prestreaming...");
+                ROS_INFO("[OFFB_NODE] prestreaming...");
                 break;
             case Mode::Prestream:
                 local_pos_pub.publish(current_pose);
                 pose_watchdog.tick();
 
                 if (received_pose && !pose_watchdog.is_healthy()) {
-                    ROS_INFO("offboarding...");
+                    ROS_INFO("[OFFB_NODE] offboarding...");
                     mode_index += 1; 
                     current_mode = Mode::Offboard;
                 }
@@ -288,14 +288,14 @@ int main(int argc, char **argv) {
                 (ros::Time::now() - last_request > ros::Duration(5.0))) {
                     // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
                     if (set_mode_client.call(offboard_set_mode) && offboard_set_mode.response.mode_sent) {
-                        ROS_INFO("offboard enabled");
+                        ROS_INFO("[OFFB_NODE] offboard enabled");
                     }
                     last_request = ros::Time::now();
                 } 
                 // comment out the arm logic it is assumed the drone is already armed and manually controlled
                 if (current_state.mode == "OFFBOARD" && 
                 (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                    ROS_INFO("hovering...");
+                    ROS_INFO("[OFFB_NODE] hovering...");
                     index = find_waypoint(current_pose, states);
                     mode_index = index; 
                     current_mode = states[index].mode;
@@ -306,13 +306,13 @@ int main(int argc, char **argv) {
                 //         (ros::Time::now() - last_request > ros::Duration(5.0))) {
                 //         // asks to arm the vehicle && checks mavros' consequential action
                 //         if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
-                //             ROS_INFO("vehicle armed");
+                //             ROS_INFO("[OFFB_NODE] vehicle armed");
                 //         }
                 //         last_request = ros::Time::now();
                 //     }
                 //     if (current_state.armed && 
                 //         (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                //         ROS_INFO("hovering...");
+                //         ROS_INFO("[OFFB_NODE] hovering...");
                 //         index = find_waypoint(current_pose, waypoints, modes);
                 //         mode_index = index; 
                 //         current_mode = states[index].mode;
@@ -321,8 +321,8 @@ int main(int argc, char **argv) {
                 break;
                 case Mode::Waypoint_0:
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("dwelling completed");
-                        ROS_INFO("hovering(1)...");
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        ROS_INFO("[OFFB_NODE] hovering(1)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_1;
@@ -332,8 +332,8 @@ int main(int argc, char **argv) {
             case Mode::Waypoint_1: 
                 // handleMode(current_mode);
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("dwelling completed");
-                        ROS_INFO("hovering(2)...");
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        ROS_INFO("[OFFB_NODE] hovering(2)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_2;
@@ -343,8 +343,8 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Waypoint_2: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("dwelling completed");
-                        ROS_INFO("hovering(3)...");
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        ROS_INFO("[OFFB_NODE] hovering(3)...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Waypoint_3;
@@ -353,8 +353,8 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Waypoint_3: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("dwelling completed");
-                        ROS_INFO("landing...");
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        ROS_INFO("[OFFB_NODE] landing...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Land;
@@ -363,8 +363,8 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Land: 
                 if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("dwelling completed");
-                        ROS_INFO("halting...");
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        ROS_INFO("[OFFB_NODE] halting...");
                         dwelling = false; 
                         mode_index += 1; 
                         current_mode = Mode::Halt;
@@ -377,7 +377,7 @@ int main(int argc, char **argv) {
                 (ros::Time::now() - last_request > ros::Duration(5.0))) {
                     // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
                     if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
-                        ROS_INFO("landing enabled");
+                        ROS_INFO("[OFFB_NODE] landing enabled");
                     }
                     last_request = ros::Time::now();
                 } 
@@ -397,13 +397,13 @@ int main(int argc, char **argv) {
             (ros::Time::now() - last_request > ros::Duration(5.0))) {
                 // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
                 if (set_mode_client.call(manual_set_mode) && manual_set_mode.response.mode_sent) {
-                    ROS_INFO("manual control enabled");
+                    ROS_INFO("[OFFB_NODE] manual control enabled");
                 }
                 last_request = ros::Time::now();
             } 
             current_mode = Mode::Prestream;
             mode_index = 1; 
-            ROS_INFO_THROTTLE(4.0, "prestreaming...");
+            ROS_INFO_THROTTLE(4.0, "[OFFB_NODE] prestreaming...");
         }
         intermediate_battery_pub.publish(current_battery);
         // intermediate_mode_pub.publish("OFFBOARD");

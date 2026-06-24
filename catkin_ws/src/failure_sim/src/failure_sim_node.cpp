@@ -40,11 +40,11 @@ struct FailureRequest {
 
     FailureRequest(std::string input) {
         if (input == "short") {
-            ROS_INFO("short dropout...");
+            ROS_INFO("[FAIL_SIM] short dropout...");
             failure_duration = random_duration(2.0, 5.0); 
             mode = Mode::Short_Dropout;
         } else if (input == "long") {
-            ROS_INFO("long dropout...");
+            ROS_INFO("[FAIL_SIM] long dropout...");
             failure_duration = random_duration(10.0, 30.0); 
             mode = Mode::Long_Dropout;
         } else if (input == "short_burst") {
@@ -93,7 +93,7 @@ void terminal_thread() {
             if (input == "quit") {
                 ros::shutdown();
             } else if (current_mode != Mode::Normal) {
-                ROS_ERROR("previous failure mode is still running");
+                ROS_ERROR("[FAIL_SIM] previous failure mode is still running");
             } else {
                 std::lock_guard<std::mutex> lock(mtx);  
                 failure_request = FailureRequest(input);
@@ -133,11 +133,11 @@ int main(int argc, char **argv) {
 
     double current_duration = 0.0; 
     ros::Time last_request = ros::Time::now(); 
-    ROS_INFO("failure simulation setting up...");
+    ROS_INFO("[FAIL_SIM] failure simulation setting up...");
 
     while(ros::ok()) {
         if (incoming_request) {  
-            ROS_INFO("processing request...");
+            ROS_INFO("[FAIL_SIM] processing request...");
             std::lock_guard<std::mutex> lock(mtx);  
             current_mode = failure_request.mode; 
             current_duration = failure_request.failure_duration; 
@@ -148,22 +148,22 @@ int main(int argc, char **argv) {
         switch (current_mode) {
             case Mode::Normal: 
             // prints every x seconds
-                ROS_INFO_THROTTLE(4.0, "manual control...");
+                ROS_INFO_THROTTLE(4.0, "[FAIL_SIM] manual control...");
                 intermediate_pose_pub.publish(current_pose);
                 // intermediate_state_pub.publish(current_state);
                 break;
             // in dropouts, intentionally publish nothing
             case Mode::Short_Dropout: 
-                ROS_INFO_THROTTLE(1.0, "performing short dropout...");
+                ROS_INFO_THROTTLE(1.0, "[FAIL_SIM] performing short dropout...");
                 if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
-                    ROS_INFO("short dropout of %fs complete...", current_duration);
+                    ROS_INFO("[FAIL_SIM] short dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
             case Mode::Long_Dropout:
-                ROS_INFO_THROTTLE(1.0, "performing long dropout...");
+                ROS_INFO_THROTTLE(1.0, "[FAIL_SIM] performing long dropout...");
                 if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
-                    ROS_INFO("long dropout of %fs complete...", current_duration);
+                    ROS_INFO("[FAIL_SIM] long dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
