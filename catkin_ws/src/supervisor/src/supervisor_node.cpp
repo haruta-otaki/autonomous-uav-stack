@@ -9,7 +9,7 @@
 #include <sensor_msgs/BatteryState.h>
 
 // include custom message
-#include <supervisor/failure_mode.h>
+#include <supervisor/FailureMode.h>
 
 #include <string>
 #include <vector>
@@ -93,6 +93,7 @@ struct MachineState {
 // global variables
 bool received_pose = false; 
 
+supervisor::FailureMode msg; 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
 geometry_msgs::PoseStamped command_pose; 
@@ -144,6 +145,9 @@ int main(int argc, char **argv) {
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("mavros/setpoint_position/local", 10);
+
+    ros::Publisher mode_pub = nh.advertise<supervisor::FailureMode> 
+        ("supervisor/failure_mode", 10);
 
     // ros::Publisher intermediate_mode_pub = nh.advertise<std::string> 
     //     ("metrics/intermediate_mode", 10);
@@ -214,6 +218,7 @@ int main(int argc, char **argv) {
 
                 mode_index += 1; 
                 current_mode = Mode::Prestream;
+                msg.mode = supervisor::FailureMode::PRESTREAM; 
                 ROS_INFO("[SUPERVISOR] prestreaming...");
                 break;
             case Mode::Prestream:
@@ -224,24 +229,31 @@ int main(int argc, char **argv) {
                     if (fallback_mode == "hover") {
                         ROS_INFO("[SUPERVISOR] hovering...");
                         current_mode = Mode::Hover;
+                        msg.mode = supervisor::FailureMode::HOVER; 
                     } else if (fallback_mode == "land") {
                         ROS_INFO("[SUPERVISOR] landing...");
                         current_mode = Mode::Land;
+                        msg.mode = supervisor::FailureMode::LAND; 
                     } else if (fallback_mode == "rtl") {
                         ROS_INFO("[SUPERVISOR] returning...");
                         current_mode = Mode::RTL;
+                        msg.mode = supervisor::FailureMode::RTL; 
                     } else if (fallback_mode == "continue") {
                         ROS_INFO("[SUPERVISOR] continuing...");
                         current_mode = Mode::Continue;
+                        msg.mode = supervisor::FailureMode::CONTINUE; 
                     } else if (fallback_mode == "smart_hover") {
                         ROS_INFO("[SUPERVISOR] hovering(smart)...");
                         current_mode = Mode::Smart_Hover;
+                        msg.mode = supervisor::FailureMode::SMART_HOVER; 
                     } else if (fallback_mode == "smart_land") {
                         ROS_INFO("[SUPERVISOR] landing(smart)...");
                         current_mode = Mode::Smart_Land;
+                        msg.mode = supervisor::FailureMode::SMART_LAND; 
                     } else {
                         ROS_INFO("[SUPERVISOR] returning(smart)...");
                         current_mode = Mode::Smart_RTL;
+                        msg.mode = supervisor::FailureMode::SMART_RTL; 
                     }
                 }
                 break;
@@ -327,7 +339,7 @@ int main(int argc, char **argv) {
             mode_index = 1; 
             ROS_INFO_THROTTLE(4.0, "[SUPERVISOR] prestreaming...");
         }
-        // intermediate_mode_pub.publish("OFFBOARD");
+        mode_pub.publish(msg);
         //keeps the loop at 20 Hz
         ros::spinOnce();
         rate.sleep();

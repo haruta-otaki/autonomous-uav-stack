@@ -7,6 +7,8 @@
 
 #include <sensor_msgs/BatteryState.h>
 
+#include <supervisor/FailureMode.h>
+
 #include <string>
 #include <vector>
 #include <fstream>
@@ -64,6 +66,34 @@ public:
     }
 };
 
+std::stringstream log_detail() {
+    std::stringstream detail;
+    switch(current_failure_mode.mode) {
+        case supervisor::FailureMode::HOVER:
+            detail << "Fallback: " << "Hover";
+            break; 
+        case supervisor::FailureMode::LAND:
+            detail << "Fallback: " << "Land";
+            break; 
+        case supervisor::FailureMode::RTL:
+            detail << "Fallback: " << "RTL";
+            break; 
+        case supervisor::FailureMode::CONTINUE:
+            detail << "Fallback: " << "Continue";
+            break; 
+        case supervisor::FailureMode::SMART_HOVER:
+            detail << "Fallback: " << "Smart Hover";
+            break; 
+        case supervisor::FailureMode::SMART_LAND:
+            detail << "Fallback: " << "Smart Land";
+            break; 
+        case supervisor::FailureMode::SMART_RTL:
+            detail << "Fallback: " << "Smart RTL";
+            break; 
+    }
+    return detail;
+}
+
 mavros_msgs::State current_state; 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
     current_state = *msg;
@@ -79,14 +109,9 @@ void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
     current_battery = *msg;
 }
 
-// sensor_msgs::BatteryState current_failure_mode; 
-// void mode_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
-//     current_failure_mode = *msg;
-// }
-
-void log(std::string filename, std::string description, double data) {
-    std::ofstream file(filename, std::ios::app); 
-    file << description << ": " << data << "\n";
+supervisor::FailureMode current_failure_mode; 
+void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
+    current_failure_mode = *msg;
 }
 
 int main(int argc, char **argv) {
@@ -100,8 +125,8 @@ int main(int argc, char **argv) {
         ("mavros/local_position/pose", 10, pose_cb);
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
         ("mavros/battery", 10, battery_cb);
-    // ros::Subscriber mode_sub = nh.subscribe<std::string>
-    //     ("metrics/intermediate_mode", 10, mode_cb);
+    ros::Subscriber mode_sub = nh.subscribe<supervisor::FailureMode>
+        ("supervisor/failure_mode", 10, mode_cb);
 
     // read parameters from launch file 
     int trial_id; 
@@ -150,18 +175,16 @@ int main(int argc, char **argv) {
         else if (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL") {
             if (failure_end) {
                 failure_duration = (ros::Time::now() - failure_time).toSec();
-                std::stringstream detail;
-                ss << std::fixed << std::setprecision(3) 
-                << "Fallback: " << ","
+                std::stringstream detail = log_detail();
+                detail << std::fixed << std::setprecision(3) 
                 << "Duration: " << failure_duration;
-                MetricsLogger logger(ss.str(), 4.0);
                 logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
             }
         } else {
             if (failure_start) {
                 failure_time = ros::Time::now();
-                // receive custom ros message for fallback mode
-                logger.write("Failure Start", current_mode, current_pose, current_battery, "");
+                std::stringstream detail = log_detail();
+                logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
             }
         }
         last_mode = current_mode;

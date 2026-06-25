@@ -8,6 +8,8 @@
 
 #include <sensor_msgs/BatteryState.h>
 
+#include <supervisor/FailureMode.h>
+
 #include <string>
 #include <vector>
 #include <limits>
