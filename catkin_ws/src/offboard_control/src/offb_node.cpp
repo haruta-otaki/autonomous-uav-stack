@@ -19,6 +19,7 @@ enum class Mode {
     Init, 
     Prestream, 
     Offboard, 
+    // Simplify to Waypoint, to make custom messages 
     Waypoint_0,
     Waypoint_1,
     Waypoint_2,
@@ -200,6 +201,9 @@ int main(int argc, char **argv) {
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("mavros/setpoint_position/local", 10);
+    
+    ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
+        ("supervisor/intermediate_pose_setpoint", 10);   
 
     ros::Publisher intermediate_battery_pub = nh.advertise<sensor_msgs::BatteryState> 
         ("metrics/intermediate_battery", 10);
@@ -389,7 +393,7 @@ int main(int argc, char **argv) {
             // continue sending the requested pose at the appropriate rate 
             // interpolation set at 5cm / tick (1 m/s)
             command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
-            local_pos_pub.publish(command_pose);
+            supervisor_pose_pub.publish(command_pose);
         }
         if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream) {
             manual_set_mode.request.custom_mode = "POSCTL";

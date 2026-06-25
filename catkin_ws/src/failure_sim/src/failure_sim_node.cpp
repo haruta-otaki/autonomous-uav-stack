@@ -118,11 +118,11 @@ int main(int argc, char **argv) {
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("mavros/local_position/pose", 10, pose_cb);
     
-    ros::Publisher intermediate_state_pub = nh.advertise<mavros_msgs::State> 
-        ("offboard_control/intermediate_state_setpoint", 10);
+    // ros::Publisher intermediate_state_pub = nh.advertise<mavros_msgs::State> 
+    //     ("supervisor/intermediate_state_setpoint", 10);
 
     ros::Publisher intermediate_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
-        ("offboard_control/intermediate_pose_setpoint", 10);
+        ("supervisor/intermediate_mavros_pose", 10);
     
     ros::Rate rate(20.0);
 

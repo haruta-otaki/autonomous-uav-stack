@@ -99,10 +99,10 @@ int main(int argc, char **argv) {
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("mavros/local_position/pose", 10, pose_cb);
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
-        ("metrics/intermediate_battery", 10, battery_cb);
+        ("mavros/battery", 10, battery_cb);
     // ros::Subscriber mode_sub = nh.subscribe<std::string>
     //     ("metrics/intermediate_mode", 10, mode_cb);
-    
+
     // read parameters from launch file 
     int trial_id; 
     std::string failure_mode; 
