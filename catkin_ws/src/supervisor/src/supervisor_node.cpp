@@ -8,6 +8,9 @@
 
 #include <sensor_msgs/BatteryState.h>
 
+// include custom message
+#include <supervisor/failure_mode.h>
+
 #include <string>
 #include <vector>
 #include <limits>
@@ -173,6 +176,7 @@ int main(int argc, char **argv) {
     std::string fallback_mode; 
     nh.param("fallback_mode", fallback_mode);
 
+    // update the machine states
     std::vector<MachineState> states = {
         MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(0.0, 0.0, 2.0, Mode::Prestream), MachineState(-15.0, 15.0, 0.3, Mode::Land)
     };
@@ -239,8 +243,6 @@ int main(int argc, char **argv) {
                         ROS_INFO("[SUPERVISOR] returning(smart)...");
                         current_mode = Mode::Smart_RTL;
                     }
-
-                    mode_index += 1; 
                 }
                 break;
             case Mode::Hover: 
@@ -280,6 +282,7 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
+                local_pos_pub.publish(command_pose);
                 break;
             case Mode::Smart_Hover:
                 if (current_state.mode != "OFFBOARD" && 

@@ -28,54 +28,6 @@ enum class Mode {
     Halt
 };
 
-// tune watchdog parameters based on hardware
-// only tracking pose, as state is necessary for changing modes 
-// ^ will be modified when communication delays are simulated in the actuall communication between QGC and PX4 
-struct Watchdog {
-    //fields 
-    int consecutive_feeds = 0; 
-    ros::Time last_cb; 
-    bool warn = false; 
-    bool trigger = false; 
-    double warn_timeout; 
-    double trigger_timeout; 
-    int feed_threshold = 4;
-
-    // constructor 
-    Watchdog(double warn_time=0.4, double trigger_time=0.8) {
-        warn_timeout = warn_time;
-        trigger_timeout = trigger_time;
-        last_cb = ros::Time(0);
-    }
-
-    // methods
-    void feed() {
-        last_cb = ros::Time::now();
-        consecutive_feeds += 1; 
-        if (consecutive_feeds > feed_threshold) {
-            warn = false; 
-            trigger = false; 
-        }
-    }
-
-    void tick() {
-        if (!warn && ros::Time::now() - last_cb > ros::Duration(warn_timeout)) {
-            consecutive_feeds = 0; 
-            warn = true; 
-            ROS_WARN("[OFFB_NODE] Watchdog: no pose received, monitoring...");
-        }
-        if (!trigger && ros::Time::now() - last_cb > ros::Duration(trigger_timeout)) {
-            consecutive_feeds = 0; 
-            trigger = true; 
-            ROS_ERROR("[OFFB_NODE] Watchdog: communication loss detected, trigerring offboard...");
-        }
-    }
-
-    bool is_healthy() {
-        return !trigger; 
-    }
-};
-
 struct MachineState {
     //fields 
     geometry_msgs::PoseStamped pose; 
@@ -98,7 +50,6 @@ bool received_pose = false;
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
 sensor_msgs::BatteryState current_battery; 
-Watchdog pose_watchdog(0.4, 0.8);
 
 // callback that saves the current state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -108,13 +59,11 @@ void state_cb(const mavros_msgs::State::ConstPtr& msg){
 void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
     received_pose = true; 
-    pose_watchdog.feed();
 }
 
 void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
     current_battery = *msg;
 }
-
 
 
 geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geometry_msgs::PoseStamped target, double step) {
@@ -236,7 +185,6 @@ int main(int argc, char **argv) {
 
     mavros_msgs::SetMode offboard_set_mode; 
     mavros_msgs::SetMode land_set_mode; 
-    mavros_msgs::SetMode manual_set_mode; 
 
     ros::Time last_request = ros::Time::now();
     ros::Time dwell_start_time = ros::Time::now();
@@ -251,51 +199,7 @@ int main(int argc, char **argv) {
     // while ros is running normally... 
     while(ros::ok()) {
         switch (current_mode) {
-            case Mode::Init: 
-                offboard_set_mode.request.custom_mode = "OFFBOARD";
-                arm_cmd.request.value = true; 
-
-                // wait for connection to be established between mavros and the autopilot 
-                // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
-                while(ros::ok() && !current_state.connected) {
-                    // lets ros process callbacks once to update current_state
-                    ros::spinOnce();
-                    rate.sleep();
-                }
-
-                // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
-                // 100 messages across 5 seconds before requesting offboard 
-                for (int i = 100; ros::ok() && i > 0; --i) {
-                    local_pos_pub.publish(states[mode_index].pose);
-                    ros::spinOnce();
-                    rate.sleep();
-                }
-
-                // handleMode(current_mode);
-                mode_index += 1; 
-                current_mode = Mode::Prestream;
-                ROS_INFO("[OFFB_NODE] prestreaming...");
-                break;
-            case Mode::Prestream:
-                local_pos_pub.publish(current_pose);
-                pose_watchdog.tick();
-
-                if (received_pose && !pose_watchdog.is_healthy()) {
-                    ROS_INFO("[OFFB_NODE] offboarding...");
-                    mode_index += 1; 
-                    current_mode = Mode::Offboard;
-                }
-                break;
             case Mode::Offboard:
-                // space the service calls by 5s (usually shorter) to not flood the autopilot with requests 
-                if (current_state.mode != "OFFBOARD" && 
-                (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                    // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-                    if (set_mode_client.call(offboard_set_mode) && offboard_set_mode.response.mode_sent) {
-                        ROS_INFO("[OFFB_NODE] offboard enabled");
-                    }
-                    last_request = ros::Time::now();
-                } 
                 // comment out the arm logic it is assumed the drone is already armed and manually controlled
                 if (current_state.mode == "OFFBOARD" && 
                 (ros::Time::now() - last_request > ros::Duration(0.5))) {
@@ -395,21 +299,6 @@ int main(int argc, char **argv) {
             command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
             supervisor_pose_pub.publish(command_pose);
         }
-        if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream) {
-            manual_set_mode.request.custom_mode = "POSCTL";
-            if (current_state.mode != "POSCTL" && 
-            (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-                if (set_mode_client.call(manual_set_mode) && manual_set_mode.response.mode_sent) {
-                    ROS_INFO("[OFFB_NODE] manual control enabled");
-                }
-                last_request = ros::Time::now();
-            } 
-            current_mode = Mode::Prestream;
-            mode_index = 1; 
-            ROS_INFO_THROTTLE(4.0, "[OFFB_NODE] prestreaming...");
-        }
-        intermediate_battery_pub.publish(current_battery);
         // intermediate_mode_pub.publish("OFFBOARD");
         //keeps the loop at 20 Hz
         ros::spinOnce();
