@@ -29,16 +29,13 @@ class MetricsLogger {
     // make file a member variable (attribute) in MetricLogger class such that it is accessible by any function within that same class
     // unlike local variables that only exist inside a single function, preventing reopening and closing the file at each write
     std::ofstream file; 
-    double flush_rate;
-    ros::Time last_log = ros::Time(0.0);
     ros::Time creation_time;
     bool creation = false; 
 
 public: 
-    MetricsLogger(const std::string& file_path, double rate) {
+    MetricsLogger(const std::string& file_path) {
         creation = true;
         creation_time = ros::Time::now();
-        flush_rate = rate; 
         file.open(file_path);
         // columns
         file <<  "time,event,mode,x,y,z,battery,details\n";
@@ -59,12 +56,30 @@ public:
             << pose.pose.position.z                       << ","
             << battery.percentage                         << ","
             << details                                    << "\n";
-        if ((ros::Time::now() - last_log).toSec() > flush_rate) {
-            file.flush(); 
-            last_log = ros::Time::now();
-        } 
+
+        file.flush(); 
     }
 };
+
+mavros_msgs::State current_state; 
+void state_cb(const mavros_msgs::State::ConstPtr& msg){
+    current_state = *msg;
+}
+
+geometry_msgs::PoseStamped current_pose; 
+void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
+    current_pose = *msg;
+}
+
+sensor_msgs::BatteryState current_battery; 
+void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
+    current_battery = *msg;
+}
+
+supervisor::FailureMode current_failure_mode; 
+void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
+    current_failure_mode = *msg;
+}
 
 std::stringstream log_detail() {
     std::stringstream detail;
@@ -94,26 +109,6 @@ std::stringstream log_detail() {
     return detail;
 }
 
-mavros_msgs::State current_state; 
-void state_cb(const mavros_msgs::State::ConstPtr& msg){
-    current_state = *msg;
-}
-
-geometry_msgs::PoseStamped current_pose; 
-void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
-    current_pose = *msg;
-}
-
-sensor_msgs::BatteryState current_battery; 
-void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
-    current_battery = *msg;
-}
-
-supervisor::FailureMode current_failure_mode; 
-void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
-    current_failure_mode = *msg;
-}
-
 int main(int argc, char **argv) {
 
     ros::init(argc, argv, "metrics_node");
@@ -133,6 +128,7 @@ int main(int argc, char **argv) {
     std::string failure_mode; 
     std::string fallback_mode; 
     std::string metrics_path; 
+    // do not provide default values to avoid silent failures 
     nh.param("trial_id", trial_id);
     nh.param("failure_mode", failure_mode);
     nh.param("fallback_mode", fallback_mode);
@@ -146,7 +142,7 @@ int main(int argc, char **argv) {
     << "_" << failure_mode 
     << "_" << fallback_mode 
     << ".csv";
-    MetricsLogger logger(ss.str(), 4.0);
+    MetricsLogger logger(ss.str());
 
     ROS_INFO("failure simulation setting up...");
 
@@ -178,7 +174,7 @@ int main(int argc, char **argv) {
                 std::stringstream detail = log_detail();
                 detail << std::fixed << std::setprecision(3) 
                 << "Duration: " << failure_duration;
-                logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
+                logger.write("Failure End", current_mode, current_pose, current_battery, detail.str());
             }
         } else {
             if (failure_start) {

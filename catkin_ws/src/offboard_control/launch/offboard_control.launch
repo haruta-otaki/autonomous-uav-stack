@@ -1,5 +1,5 @@
-<!-- built on default PX4 SITL + MAVROS launch file -->
 <?xml version="1.0"?>
+<!-- built on default PX4 SITL + MAVROS launch file -->
 <launch>
     <!-- MAVROS posix SITL environment launch script -->
     <!-- launches MAVROS, PX4 SITL, Gazebo environment, and spawns vehicle -->
@@ -85,5 +85,10 @@
         <param name="failure_mode" value="$(arg failure_mode)"/>
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
         <param name="metrics_path" value="$(find metrics)"/>
-    <node/>
+    </node>
+
+    <node pkg="supervisor" type="supervisor_node" name="supervisor_node" output="screen">
+        <param name="fallback_mode" value="$(arg fallback_mode)"/>
+    </node>
+
 </launch>

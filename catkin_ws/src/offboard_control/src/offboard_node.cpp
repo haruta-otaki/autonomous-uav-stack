@@ -63,10 +63,10 @@ void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     received_pose = true; 
 }
 
-void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
-    current_battery = *msg;
+supervisor::FailureMode current_failure_mode; 
+void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
+    current_failure_mode = *msg;
 }
-
 
 geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geometry_msgs::PoseStamped target, double step) {
     double dx = target.pose.position.x - current.pose.position.x;
@@ -144,23 +144,13 @@ int main(int argc, char **argv) {
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
-        ("offboard_control/intermediate_pose_setpoint", 10, pose_cb);
-       
-    ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
-        ("mavros/battery", 10, battery_cb);
-        
+        ("supervisor/intermediate_mavros_pose", 10, pose_cb);
+    ros::Subscriber mode_sub = nh.subscribe<supervisor::FailureMode>
+        ("supervisor/failure_mode", 10, mode_cb);
+
     // publishes the commanded local position (relative to local origin)
-    ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
-        ("mavros/setpoint_position/local", 10);
-    
     ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
-        ("supervisor/intermediate_pose_setpoint", 10);   
-
-    ros::Publisher intermediate_battery_pub = nh.advertise<sensor_msgs::BatteryState> 
-        ("metrics/intermediate_battery", 10);
-
-    // ros::Publisher intermediate_mode_pub = nh.advertise<std::string> 
-    //     ("metrics/intermediate_mode", 10);
+        ("supervisor/intermediate_offboard_pose", 10);   
 
     // clients that request arming and mode changes
     // mavros prefix depend on the name given to the node in .launch file
@@ -175,7 +165,7 @@ int main(int argc, char **argv) {
     ros::Rate rate(20.0);
 
     std::vector<MachineState> states = {
-        MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(0.0, 0.0, 2.0, Mode::Prestream), MachineState(0.0, 0.0, 2.0, Mode::Offboard), 
+        MachineState(0.0, 0.0, 2.0, Mode::Offboard), 
         MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), 
         MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3), MachineState(-15.0, 15.0, 0.3, Mode::Land), MachineState(-15.0, 15.0, 0.3, Mode::Halt)
     };
@@ -183,6 +173,7 @@ int main(int argc, char **argv) {
     int mode_index = 0;
     int index = 3; 
     bool dwelling = false; 
+    bool new_failure = false; 
     double tol = 0.3; 
 
     mavros_msgs::SetMode offboard_set_mode; 
@@ -195,113 +186,120 @@ int main(int argc, char **argv) {
     mavros_msgs::CommandBool arm_cmd; 
     
     ROS_INFO("[OFFB_NODE] initializing...");
-    Mode current_mode = Mode::Init;
+    Mode current_mode;
     geometry_msgs::PoseStamped command_pose = states[0].pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
-        switch (current_mode) {
-            case Mode::Offboard:
-                // comment out the arm logic it is assumed the drone is already armed and manually controlled
-                if (current_state.mode == "OFFBOARD" && 
-                (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                    ROS_INFO("[OFFB_NODE] hovering...");
-                    index = find_waypoint(current_pose, states);
-                    mode_index = index; 
-                    current_mode = states[index].mode;
-                }
-                // else {
-                //     // arm the quad to allow it to fly (spin motors & apply actuator outputs)
-                //     if (!current_state.armed && 
-                //         (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                //         // asks to arm the vehicle && checks mavros' consequential action
-                //         if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
-                //             ROS_INFO("[OFFB_NODE] vehicle armed");
-                //         }
-                //         last_request = ros::Time::now();
-                //     }
-                //     if (current_state.armed && 
-                //         (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                //         ROS_INFO("[OFFB_NODE] hovering...");
-                //         index = find_waypoint(current_pose, waypoints, modes);
-                //         mode_index = index; 
-                //         current_mode = states[index].mode;
-                //     }
-                // }
-                break;
-                case Mode::Waypoint_0:
-                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        ROS_INFO("[OFFB_NODE] hovering(1)...");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_1;
-                    
-                }
-                break;
-            case Mode::Waypoint_1: 
-                // handleMode(current_mode);
-                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        ROS_INFO("[OFFB_NODE] hovering(2)...");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_2;
-                    
-                }
-
-                break;
-            case Mode::Waypoint_2: 
-                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        ROS_INFO("[OFFB_NODE] hovering(3)...");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_3;
-                    
-                }
-                break;
-            case Mode::Waypoint_3: 
-                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        ROS_INFO("[OFFB_NODE] landing...");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Land;
-                    
-                }
-                break;
-            case Mode::Land: 
-                if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        ROS_INFO("[OFFB_NODE] halting...");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Halt;
-                    
-                }
-                break;
-            case Mode::Halt: 
-                land_set_mode.request.custom_mode = "AUTO.LAND";
-                if (current_state.mode != "AUTO.LAND" && 
-                (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                    // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-                    if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
-                        ROS_INFO("[OFFB_NODE] landing enabled");
+        if (current_failure_mode.mode == supervisor::FailureMode::CONTINUE) {
+            if (!new_failure) {
+                current_mode = Mode::Offboard;
+                new_failure = true; 
+            }
+            switch (current_mode) {
+                case Mode::Offboard:
+                    // comment out the arm logic it is assumed the drone is already armed and manually controlled
+                    if (current_state.mode == "OFFBOARD" && 
+                    (ros::Time::now() - last_request > ros::Duration(0.5))) {
+                        ROS_INFO("[OFFB_NODE] hovering...");
+                        index = find_waypoint(current_pose, states);
+                        mode_index = index; 
+                        current_mode = states[index].mode;
                     }
-                    last_request = ros::Time::now();
-                } 
-                   
-                break;
+                    // else {
+                    //     // arm the quad to allow it to fly (spin motors & apply actuator outputs)
+                    //     if (!current_state.armed && 
+                    //         (ros::Time::now() - last_request > ros::Duration(5.0))) {
+                    //         // asks to arm the vehicle && checks mavros' consequential action
+                    //         if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
+                    //             ROS_INFO("[OFFB_NODE] vehicle armed");
+                    //         }
+                    //         last_request = ros::Time::now();
+                    //     }
+                    //     if (current_state.armed && 
+                    //         (ros::Time::now() - last_request > ros::Duration(0.5))) {
+                    //         ROS_INFO("[OFFB_NODE] hovering...");
+                    //         index = find_waypoint(current_pose, waypoints, modes);
+                    //         mode_index = index; 
+                    //         current_mode = states[index].mode;
+                    //     }
+                    // }
+                    break;
+                    case Mode::Waypoint_0:
+                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
+                            ROS_INFO("[OFFB_NODE] dwelling completed");
+                            ROS_INFO("[OFFB_NODE] hovering(1)...");
+                            dwelling = false; 
+                            mode_index += 1; 
+                            current_mode = Mode::Waypoint_1;
+                        
+                    }
+                    break;
+                case Mode::Waypoint_1: 
+                    // handleMode(current_mode);
+                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
+                            ROS_INFO("[OFFB_NODE] dwelling completed");
+                            ROS_INFO("[OFFB_NODE] hovering(2)...");
+                            dwelling = false; 
+                            mode_index += 1; 
+                            current_mode = Mode::Waypoint_2;
+                        
+                    }
+
+                    break;
+                case Mode::Waypoint_2: 
+                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
+                            ROS_INFO("[OFFB_NODE] dwelling completed");
+                            ROS_INFO("[OFFB_NODE] hovering(3)...");
+                            dwelling = false; 
+                            mode_index += 1; 
+                            current_mode = Mode::Waypoint_3;
+                        
+                    }
+                    break;
+                case Mode::Waypoint_3: 
+                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
+                            ROS_INFO("[OFFB_NODE] dwelling completed");
+                            ROS_INFO("[OFFB_NODE] landing...");
+                            dwelling = false; 
+                            mode_index += 1; 
+                            current_mode = Mode::Land;
+                        
+                    }
+                    break;
+                case Mode::Land: 
+                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
+                            ROS_INFO("[OFFB_NODE] dwelling completed");
+                            ROS_INFO("[OFFB_NODE] halting...");
+                            dwelling = false; 
+                            mode_index += 1; 
+                            current_mode = Mode::Halt;
+                        
+                    }
+                    break;
+                case Mode::Halt: 
+                    land_set_mode.request.custom_mode = "AUTO.LAND";
+                    if (current_state.mode != "AUTO.LAND" && 
+                    (ros::Time::now() - last_request > ros::Duration(5.0))) {
+                        // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
+                        if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
+                            ROS_INFO("[OFFB_NODE] landing enabled");
+                        }
+                        last_request = ros::Time::now();
+                    } 
+                    
+                    break;
+            }
+            if (mode_index > 1 && mode_index < states.size()) {
+                // continue sending the requested pose at the appropriate rate 
+                // interpolation set at 5cm / tick (1 m/s)
+                command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
+                supervisor_pose_pub.publish(command_pose);
+            }
+        } else {
+            new_failure = false; 
         }
 
-        if (mode_index > 1 && mode_index < states.size()) {
-            // continue sending the requested pose at the appropriate rate 
-            // interpolation set at 5cm / tick (1 m/s)
-            command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
-            supervisor_pose_pub.publish(command_pose);
-        }
-        // intermediate_mode_pub.publish("OFFBOARD");
         //keeps the loop at 20 Hz
         ros::spinOnce();
         rate.sleep();

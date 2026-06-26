@@ -93,14 +93,14 @@ struct MachineState {
 // global variables
 bool received_pose = false; 
 
-supervisor::FailureMode msg; 
+supervisor::FailureMode failure_mode_msg; 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
 geometry_msgs::PoseStamped command_pose; 
 sensor_msgs::BatteryState current_battery; 
 Watchdog pose_watchdog(0.4, 0.8);
 
-// callback that saves the current state of the autopilot 
+// callback that saves the currfailure_mode_msgent state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
     current_state = *msg;
 }
@@ -126,13 +126,14 @@ void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
 // offboard mode is defined as a mode in which the drone is controlled by an external computer (ros node)
 int main(int argc, char **argv) {
     // starts ros node
-    ros::init(argc, argv, "offboard_control_node");
+    ros::init(argc, argv, "supervisor_node");
     // node's access point to ros
     ros::NodeHandle nh;
 
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
+    // placeholder, reconsider 
     ros::Subscriber mavros_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("supervisor/intermediate_mavros_pose", 10, pose_cb);
     
@@ -148,9 +149,6 @@ int main(int argc, char **argv) {
 
     ros::Publisher mode_pub = nh.advertise<supervisor::FailureMode> 
         ("supervisor/failure_mode", 10);
-
-    // ros::Publisher intermediate_mode_pub = nh.advertise<std::string> 
-    //     ("metrics/intermediate_mode", 10);
 
     // clients that request arming and mode changes
     // mavros prefix depend on the name given to the node in .launch file
@@ -186,6 +184,7 @@ int main(int argc, char **argv) {
     };
 
     int mode_index = 0; 
+    bool recovery_eligible; 
     ros::Time last_request = ros::Time::now();
     // currently unused 
     mavros_msgs::CommandBool arm_cmd; 
@@ -218,42 +217,43 @@ int main(int argc, char **argv) {
 
                 mode_index += 1; 
                 current_mode = Mode::Prestream;
-                msg.mode = supervisor::FailureMode::PRESTREAM; 
+                failure_mode_msg.mode = supervisor::FailureMode::PRESTREAM; 
                 ROS_INFO("[SUPERVISOR] prestreaming...");
                 break;
             case Mode::Prestream:
                 local_pos_pub.publish(current_pose);
-                pose_watchdog.tick();
-
-                if (received_pose && !pose_watchdog.is_healthy()) {
-                    if (fallback_mode == "hover") {
-                        ROS_INFO("[SUPERVISOR] hovering...");
-                        current_mode = Mode::Hover;
-                        msg.mode = supervisor::FailureMode::HOVER; 
-                    } else if (fallback_mode == "land") {
-                        ROS_INFO("[SUPERVISOR] landing...");
-                        current_mode = Mode::Land;
-                        msg.mode = supervisor::FailureMode::LAND; 
-                    } else if (fallback_mode == "rtl") {
-                        ROS_INFO("[SUPERVISOR] returning...");
-                        current_mode = Mode::RTL;
-                        msg.mode = supervisor::FailureMode::RTL; 
-                    } else if (fallback_mode == "continue") {
-                        ROS_INFO("[SUPERVISOR] continuing...");
-                        current_mode = Mode::Continue;
-                        msg.mode = supervisor::FailureMode::CONTINUE; 
-                    } else if (fallback_mode == "smart_hover") {
-                        ROS_INFO("[SUPERVISOR] hovering(smart)...");
-                        current_mode = Mode::Smart_Hover;
-                        msg.mode = supervisor::FailureMode::SMART_HOVER; 
-                    } else if (fallback_mode == "smart_land") {
-                        ROS_INFO("[SUPERVISOR] landing(smart)...");
-                        current_mode = Mode::Smart_Land;
-                        msg.mode = supervisor::FailureMode::SMART_LAND; 
-                    } else {
-                        ROS_INFO("[SUPERVISOR] returning(smart)...");
-                        current_mode = Mode::Smart_RTL;
-                        msg.mode = supervisor::FailureMode::SMART_RTL; 
+                if (received_pose) {
+                    pose_watchdog.tick();
+                    if (!pose_watchdog.is_healthy()) {
+                        if (fallback_mode == "hover") {
+                            ROS_INFO("[SUPERVISOR] hovering...");
+                            current_mode = Mode::Hover;
+                            failure_mode_msg.mode = supervisor::FailureMode::HOVER; 
+                        } else if (fallback_mode == "land") {
+                            ROS_INFO("[SUPERVISOR] landing...");
+                            current_mode = Mode::Land;
+                            failure_mode_msg.mode = supervisor::FailureMode::LAND; 
+                        } else if (fallback_mode == "rtl") {
+                            ROS_INFO("[SUPERVISOR] returning...");
+                            current_mode = Mode::RTL;
+                            failure_mode_msg.mode = supervisor::FailureMode::RTL; 
+                        } else if (fallback_mode == "continue") {
+                            ROS_INFO("[SUPERVISOR] continuing...");
+                            current_mode = Mode::Continue;
+                            failure_mode_msg.mode = supervisor::FailureMode::CONTINUE; 
+                        } else if (fallback_mode == "smart_hover") {
+                            ROS_INFO("[SUPERVISOR] hovering(smart)...");
+                            current_mode = Mode::Smart_Hover;
+                            failure_mode_msg.mode = supervisor::FailureMode::SMART_HOVER; 
+                        } else if (fallback_mode == "smart_land") {
+                            ROS_INFO("[SUPERVISOR] landing(smart)...");
+                            current_mode = Mode::Smart_Land;
+                            failure_mode_msg.mode = supervisor::FailureMode::SMART_LAND; 
+                        } else {
+                            ROS_INFO("[SUPERVISOR] returning(smart)...");
+                            current_mode = Mode::Smart_RTL;
+                            failure_mode_msg.mode = supervisor::FailureMode::SMART_RTL; 
+                        }
                     }
                 }
                 break;
@@ -324,8 +324,9 @@ int main(int argc, char **argv) {
                 } 
                 break;
         }
+        recovery_eligible = current_mode != Mode::Land && current_mode != Mode::Smart_Land;
 
-        if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream) {
+        if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream && recovery_eligible) {
             manual_set_mode.request.custom_mode = "POSCTL";
             if (current_state.mode != "POSCTL" && 
             (ros::Time::now() - last_request > ros::Duration(5.0))) {
@@ -339,7 +340,7 @@ int main(int argc, char **argv) {
             mode_index = 1; 
             ROS_INFO_THROTTLE(4.0, "[SUPERVISOR] prestreaming...");
         }
-        mode_pub.publish(msg);
+        mode_pub.publish(failure_mode_msg);
         //keeps the loop at 20 Hz
         ros::spinOnce();
         rate.sleep();
