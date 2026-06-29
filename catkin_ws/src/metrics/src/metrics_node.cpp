@@ -37,6 +37,9 @@ public:
         creation = true;
         creation_time = ros::Time::now();
         file.open(file_path);
+        if(!file.is_open()) {
+            ROS_ERROR_STREAM("file cannot be opened " << file_path);
+        }
         // columns
         file <<  "time,event,mode,x,y,z,battery,details\n";
         ROS_INFO("[METRICS] logging...");
@@ -113,6 +116,7 @@ int main(int argc, char **argv) {
 
     ros::init(argc, argv, "metrics_node");
     ros::NodeHandle nh;
+    ros::NodeHandle nh_private("~"); 
 
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
@@ -129,10 +133,13 @@ int main(int argc, char **argv) {
     std::string fallback_mode; 
     std::string metrics_path; 
     // do not provide default values to avoid silent failures 
-    nh.param("trial_id", trial_id);
-    nh.param("failure_mode", failure_mode);
-    nh.param("fallback_mode", fallback_mode);
-    nh.param("metrics_path", metrics_path);
+    nh_private.param("trial_id", trial_id, -1);
+    nh_private.param("failure_mode", failure_mode, std::string(""));
+    nh_private.param("fallback_mode", fallback_mode, std::string(""));
+    nh_private.param("metrics_path", metrics_path, std::string(""));
+    ROS_INFO_STREAM("[METRICS] trial_id = '" << trial_id << "'");
+    ROS_INFO_STREAM("[METRICS] failure_mode = '" << failure_mode << "'");
+    ROS_INFO_STREAM("[METRICS] fallback_mode = '" << fallback_mode << "'");
 
     ros::Rate rate(20.0);
 
@@ -160,7 +167,7 @@ int main(int argc, char **argv) {
     while(ros::ok()) {
         current_mode = current_state.mode; 
         failure_start = current_mode == "OFFBOARD" && last_mode != "OFFBOARD"; 
-        failure_end = last_mode == "OFFBOARD" && (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL");
+        failure_end = last_mode == "OFFBOARD" && (current_mode == "AUTO.LOITER" || current_mode == "POSCTL");
         if (current_mode == "AUTO.TAKEOFF" && !takeoff) {
             logger.write("Mission Start", current_mode, current_pose, current_battery, "");
             takeoff = true;

@@ -129,6 +129,7 @@ int main(int argc, char **argv) {
     ros::init(argc, argv, "supervisor_node");
     // node's access point to ros
     ros::NodeHandle nh;
+    ros::NodeHandle nh_private("~"); 
 
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
@@ -176,7 +177,8 @@ int main(int argc, char **argv) {
     // consider "AUTO.MISSION"
     
     std::string fallback_mode; 
-    nh.param("fallback_mode", fallback_mode);
+    nh_private.param("fallback_mode", fallback_mode, std::string(""));
+    ROS_INFO_STREAM("[SUPERVISOR] fallback_mode = '" << fallback_mode << "'");
 
     // update the machine states
     std::vector<MachineState> states = {
@@ -225,6 +227,7 @@ int main(int argc, char **argv) {
                 if (received_pose) {
                     pose_watchdog.tick();
                     if (!pose_watchdog.is_healthy()) {
+                        ROS_INFO_STREAM("[SUPERVISOR] fallback_mode = '" << fallback_mode << "'");
                         if (fallback_mode == "hover") {
                             ROS_INFO("[SUPERVISOR] hovering...");
                             current_mode = Mode::Hover;
