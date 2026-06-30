@@ -84,6 +84,10 @@ void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
 std::stringstream log_detail() {
     std::stringstream detail;
     switch(current_failure_mode.mode) {
+        case supervisor::FailureMode::PRESTREAM:
+            ROS_WARN("[METRICS] logging failure while prestreaming...");
+            detail << "Fallback: " << "Unknown";
+            break; 
         case supervisor::FailureMode::HOVER:
             detail << "Fallback: " << "Hover";
             break; 
@@ -121,6 +125,7 @@ int main(int argc, char **argv) {
         ("mavros/local_position/pose", 10, pose_cb);
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
         ("mavros/battery", 10, battery_cb);
+
     ros::Subscriber mode_sub = nh.subscribe<supervisor::FailureMode>
         ("supervisor/failure_mode", 10, mode_cb);
 
@@ -154,41 +159,40 @@ int main(int argc, char **argv) {
     bool land = false; 
     bool failure_start = false;
     bool failure_end = false;
-    std::string current_mode; 
-    std::string last_mode; 
-
+    bool last_armed = false; 
+    int current_mode = supervisor::FailureMode::PRESTREAM; 
+    int last_mode = supervisor::FailureMode::PRESTREAM; 
 
     while(ros::ok()) {
-        current_mode = current_state.mode; 
-        failure_start = current_mode == "OFFBOARD" && last_mode != "OFFBOARD"; 
-        failure_end = last_mode == "OFFBOARD" && (current_mode == "AUTO.LOITER" || current_mode == "POSCTL");
-        if (current_mode == "AUTO.TAKEOFF" && !takeoff) {
-            ROS_INFO("[METRICS] logging takeoff...");
-            logger.write("Mission Start", current_mode, current_pose, current_battery, "");
-            takeoff = true;
-        } else if (current_mode == "AUTO.LAND" && !land) {
-            ROS_INFO("[METRICS] logging landing...");
-            logger.write("Mission Complete", current_mode, current_pose, current_battery, "");
-            land = true; 
+        current_mode = current_failure_mode.mode;
+        failure_start = current_mode != supervisor::FailureMode::PRESTREAM && last_mode == supervisor::FailureMode::PRESTREAM; 
+        failure_end = current_mode == supervisor::FailureMode::PRESTREAM && last_mode != supervisor::FailureMode::PRESTREAM; 
+        if (current_state.armed && !last_armed) {
+            ROS_INFO("[METRICS] logging mission start...");
+            logger.write("Mission Start", current_state.mode, current_pose, current_battery, "");
+        } 
+        if (!current_state.armed && last_armed) {
+            ROS_INFO("[METRICS] logging mission end...");
+            logger.write("Mission Complete", current_state.mode, current_pose, current_battery, "");
+        } 
+        
+        if (failure_start) {
+            ROS_INFO("[METRICS] logging failure start...");
+            failure_time = ros::Time::now();
+            std::stringstream detail = log_detail();
+            logger.write("Failure Start", current_state.mode, current_pose, current_battery, detail.str());
         }
-        else if (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL") {
-            if (failure_end) {
-                ROS_INFO("[METRICS] logging failure completion...");
-                failure_duration = (ros::Time::now() - failure_time).toSec();
-                std::stringstream detail = log_detail();
-                detail << std::fixed << std::setprecision(3) 
-                << "Duration: " << failure_duration;
-                logger.write("Failure End", current_mode, current_pose, current_battery, detail.str());
-            }
-        } else {
-            if (failure_start) {
-                ROS_INFO("[METRICS] logging failure start...");
-                failure_time = ros::Time::now();
-                std::stringstream detail = log_detail();
-                logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
-            }
+        if (failure_end) {
+            ROS_INFO("[METRICS] logging failure completion...");
+            failure_duration = (ros::Time::now() - failure_time).toSec();
+            std::stringstream detail = log_detail();
+            detail << std::fixed << std::setprecision(3) 
+            << "Duration: " << failure_duration;
+            logger.write("Failure End", current_state.mode, current_pose, current_battery, detail.str());
         }
-        last_mode = current_mode;
+    
+        last_armed = current_state.armed; 
+        last_mode = current_mode; 
         ros::spinOnce();
         rate.sleep();
     }

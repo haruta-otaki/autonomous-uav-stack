@@ -61,7 +61,7 @@ struct Watchdog {
         if (!warn && ros::Time::now() - last_cb > ros::Duration(warn_timeout)) {
             consecutive_feeds = 0; 
             warn = true; 
-            ROS_WARN("[SUPERVISOR] Watchdog: no pose received, monitoring...");
+            ROS_WARN("[SUPERVISOR] Watchdog: no RC input received, monitoring...");
         }
         if (!trigger && ros::Time::now() - last_cb > ros::Duration(trigger_timeout)) {
             consecutive_feeds = 0; 
@@ -91,16 +91,13 @@ struct MachineState {
     }
 };
 
-// global variables
-bool received_pose = false; 
-
 supervisor::FailureMode failure_mode_msg; 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
 geometry_msgs::PoseStamped command_pose; 
 sensor_msgs::BatteryState current_battery;
 bool received_rc = false; 
-Watchdog pose_watchdog(0.4, 0.8);
+Watchdog rc_watchdog(0.4, 0.8);
 
 // callback that saves the currfailure_mode_msgent state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -109,8 +106,6 @@ void state_cb(const mavros_msgs::State::ConstPtr& msg){
 
 void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
     current_pose = *msg;
-    received_pose = true; 
-    pose_watchdog.feed();
 }
 
 void offboard_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
@@ -122,10 +117,12 @@ void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
 }
 
 void rc_cb(const mavros_msgs::RCIn::ConstPtr& msg){
-    // signal strength (0-255, 0 = no signal, RC Lost)
-    // pointer->member is equivalent to (*pointer).member
-    received_rc = msg->rssi > 0; 
-    pose_watchdog.feed();
+    if (msg->rssi > 0) {
+        // signal strength (0-255, 0 = no signal, RC Lost)
+        // pointer->member is equivalent to (*pointer).member
+        received_rc = true; 
+        rc_watchdog.feed();
+    } 
 }
 
 // a topic is continuous streaming
@@ -143,9 +140,13 @@ int main(int argc, char **argv) {
     //topic: mavros/state, queue size: 10, callback: state_cb()
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
+
+    ros::Subscriber rc_sub = nh.subscribe<mavros_msgs::RCIn>
+        ("mavros/rc/in", 10, rc_cb);
+
     // placeholder, reconsider 
     ros::Subscriber mavros_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
-        ("supervisor/intermediate_mavros_pose", 10, pose_cb);
+        ("mavros/local_position/pose", 10, pose_cb);
     
     ros::Subscriber offboard_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
         ("supervisor/intermediate_offboard_pose", 10, offboard_pose_cb);
@@ -160,10 +161,6 @@ int main(int argc, char **argv) {
     ros::Publisher mode_pub = nh.advertise<supervisor::FailureMode> 
         ("supervisor/failure_mode", 10);
 
-    // clients that request arming and mode changes
-    // mavros prefix depend on the name given to the node in .launch file
-    ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
-        ("mavros/cmd/arming");
     ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
         ("mavros/set_mode");
     
@@ -196,8 +193,6 @@ int main(int argc, char **argv) {
     int mode_index = 0; 
     bool recovery_eligible; 
     ros::Time last_request = ros::Time::now();
-    // currently unused 
-    mavros_msgs::CommandBool arm_cmd; 
     
     ROS_INFO("[SUPERVISOR] initializing...");
     Mode current_mode = Mode::Init;
@@ -207,7 +202,6 @@ int main(int argc, char **argv) {
     while(ros::ok()) {
         switch (current_mode) {
             case Mode::Init: 
-                arm_cmd.request.value = true; 
 
                 // wait for connection to be established between mavros and the autopilot 
                 // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
@@ -232,9 +226,9 @@ int main(int argc, char **argv) {
                 break;
             case Mode::Prestream:
                 local_pos_pub.publish(current_pose);
-                if (received_pose) {
-                    pose_watchdog.tick();
-                    if (!pose_watchdog.is_healthy()) {
+                if (received_rc) {
+                    rc_watchdog.tick();
+                    if (!rc_watchdog.is_healthy()) {
                         ROS_INFO_STREAM("[SUPERVISOR] fallback_mode = '" << fallback_mode << "'");
                         if (fallback_mode == "hover") {
                             ROS_INFO("[SUPERVISOR] hovering...");
@@ -265,8 +259,10 @@ int main(int argc, char **argv) {
                             current_mode = Mode::Smart_RTL;
                             failure_mode_msg.mode = supervisor::FailureMode::SMART_RTL; 
                         } else {
-                            ROS_WARN("[SUPERVISOR] no fallback mode selected...");
-                            ROS_INFO("[SUPERVISOR] prestreaming...");
+                            ROS_WARN("[SUPERVISOR] no fallback mode selected, default landing fallback activated...");
+                            ROS_INFO("[SUPERVISOR] landing...");
+                            current_mode = Mode::Land;
+                            failure_mode_msg.mode = supervisor::FailureMode::LAND; 
                         }
                     }
                 }
@@ -340,7 +336,7 @@ int main(int argc, char **argv) {
         }
         recovery_eligible = current_mode != Mode::Land && current_mode != Mode::Smart_Land;
 
-        if (pose_watchdog.is_healthy() && current_mode != Mode::Prestream && recovery_eligible) {
+        if (rc_watchdog.is_healthy() && current_mode != Mode::Prestream && recovery_eligible) {
             manual_set_mode.request.custom_mode = "POSCTL";
             if (current_state.mode != "POSCTL" && 
             (ros::Time::now() - last_request > ros::Duration(5.0))) {
