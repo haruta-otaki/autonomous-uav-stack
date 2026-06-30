@@ -98,27 +98,33 @@ void dropout(double duration) {
     // cut QGC - PX4 connection
     // installs a queuing discipline (qdisc) or router on the loopback interface (lo) at the root of its traffic control hierarchy
     // with the "prio" qdisc type, which creates multiple priority bands that traffic can be classified into
-    if (system("sudo tc qdisc add dev lo root handle 1: prio")) {
+    if (system("sudo -n tc qdisc add dev lo root handle 1: prio")) {
         ROS_WARN("[FAIL_SIM] failed adding root qdisc");
     }
     // adds a filter that inspects packets and decides which band (1:) to send them into such that 
     // any packet destined for ip port 14550 gets routed into queue 1:1
-    if (system("sudo tc filter add dev lo protocol ip parent 1:0 \
-            prio 1 u32 match ip dport 14550 0xffff flowid 1:1")) {
+    if (system("sudo -n tc filter add dev lo protocol ip parent 1:0 \
+        prio 1 u32 match ip dport 14550 0xffff flowid 1:1")) {
         ROS_WARN("[FAIL_SIM] failed adding filter");
     }
+
+    if (system("sudo -n tc filter add dev lo protocol ip parent 1:0 \
+        prio 2 u32 match ip dport 18570 0xffff flowid 1:1")) {
+        ROS_WARN("[FAIL_SIM] failed adding filter");
+    }
+
     //  attaches netem (network emulator qdisc, which can drop, delay, duplicate, or corrupt packets) to band 1:1 specifically
     // such that only packets that were filtered into band 1:1 get dropped. Everything else passes through bands 1:2/1:3 untouched.
-    if (system("tc qdisc add dev lo parent 1:1 handle 10: netem loss 100%")) {
+    if (system("sudo -n tc qdisc add dev lo parent 1:1 handle 10: netem loss 100%")) {
         ROS_WARN("[FAIL_SIM] failed attaching network emulator");
     }
-    
+
     // wait
     interruptible_sleep(duration);
     
     // revive connection
     // deletes the entire root qdisc you installed (netem and the filter were both children of that root thus, removing them as well)
-    if (system("sudo tc qdisc del dev lo root") != 0) {
+    if (system("sudo -n tc qdisc del dev lo root") != 0) {
         ROS_WARN("[FAIL_SIM] failed deleting root qdisc");
     }
     ROS_INFO("[FAIL_SIM] connection restored");
@@ -149,7 +155,7 @@ int main(int argc, char **argv) {
 
     // detach() allows fail_sim_thread to not block the main thread when it calls sleep()
     std::thread fail_sim_thread(network_thread);
-    
+
     ros::Rate rate(20.0);
 
     double current_duration = 0.0; 

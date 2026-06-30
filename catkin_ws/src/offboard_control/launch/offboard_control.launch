@@ -91,4 +91,10 @@
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
     </node>
 
+    <!-- set COM_RC_LOSS_T and COM_DL_LOSS_T values to isolate supervisor behavior from PX4 firmware failsafes -->
+    <node pkg="mavros" type="mavparam" name="set_rc_loss_timeout" output="screen"
+      args="set COM_RC_LOSS_T 60.0"/>
+    <node pkg="mavros" type="mavparam" name="set_dl_loss_timeout" output="screen"
+      args="set COM_DL_LOSS_T 60.0"/>
+
 </launch>

@@ -222,9 +222,9 @@ int main(int argc, char **argv) {
                 mode_index += 1; 
                 current_mode = Mode::Prestream;
                 failure_mode_msg.mode = supervisor::FailureMode::PRESTREAM; 
-                ROS_INFO("[SUPERVISOR] prestreaming...");
                 break;
             case Mode::Prestream:
+                ROS_INFO_THROTTLE(4.0, "[SUPERVISOR] prestreaming...");
                 local_pos_pub.publish(current_pose);
                 if (received_rc) {
                     rc_watchdog.tick();
