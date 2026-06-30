@@ -27,10 +27,7 @@ enum class Mode {
     Normal, 
     Short_Dropout,
     Long_Dropout,
-    Burst_Short_Dropout,
-    Burst_Long_Dropout,
-    Command_Degradation,
-    State_Degradation
+    Latency
 };
 
 struct FailureRequest {
@@ -48,13 +45,7 @@ struct FailureRequest {
             failure_duration = random_duration(10.0, 30.0); 
             mode = Mode::Long_Dropout;
         } else if (input == "short_burst") {
-            mode = Mode::Burst_Short_Dropout;
-        } else if (input == "long_burst") {
-            mode = Mode::Burst_Long_Dropout;
-        } else if (input == "command") {
-            mode = Mode::Command_Degradation;
-        } else if (input == "state") {
-            mode = Mode::State_Degradation;
+            mode = Mode::Latency;
         } else {
             mode = Mode::Normal;
         }
@@ -63,18 +54,9 @@ struct FailureRequest {
 
 FailureRequest failure_request("normal"); 
 std::atomic<bool> incoming_request(false); 
+std::atomic<bool> processed_request(true); 
 std::atomic<Mode> current_mode(Mode::Normal);
-
-// callback that saves the current state of the autopilot 
-mavros_msgs::State current_state; 
-void state_cb(const mavros_msgs::State::ConstPtr& msg){
-    current_state = *msg;
-}
-
-geometry_msgs::PoseStamped current_pose; 
-void pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
-    current_pose = *msg;
-}
+std::atomic<double> current_duration(0.0);
 
 void terminal_thread() {
     std::string input; 
@@ -105,6 +87,58 @@ void terminal_thread() {
     }
 }
 
+void interruptible_sleep(double duration) {
+    ros::Time start = ros::Time::now();
+    while (ros::ok() && (ros::Time::now() - start).toSec() < duration) {
+        ros::Duration(0.1).sleep();
+    }
+}
+
+void dropout(double duration) {
+    // cut QGC - PX4 connection
+    // installs a queuing discipline (qdisc) or router on the loopback interface (lo) at the root of its traffic control hierarchy
+    // with the "prio" qdisc type, which creates multiple priority bands that traffic can be classified into
+    if (system("sudo tc qdisc add dev lo root handle 1: prio")) {
+        ROS_WARN("[FAIL_SIM] failed adding root qdisc");
+    }
+    // adds a filter that inspects packets and decides which band (1:) to send them into such that 
+    // any packet destined for ip port 14550 gets routed into queue 1:1
+    if (system("sudo tc filter add dev lo protocol ip parent 1:0 \
+            prio 1 u32 match ip dport 14550 0xffff flowid 1:1")) {
+        ROS_WARN("[FAIL_SIM] failed adding filter");
+    }
+    //  attaches netem (network emulator qdisc, which can drop, delay, duplicate, or corrupt packets) to band 1:1 specifically
+    // such that only packets that were filtered into band 1:1 get dropped. Everything else passes through bands 1:2/1:3 untouched.
+    if (system("tc qdisc add dev lo parent 1:1 handle 10: netem loss 100%")) {
+        ROS_WARN("[FAIL_SIM] failed attaching network emulator");
+    }
+    
+    // wait
+    interruptible_sleep(duration);
+    
+    // revive connection
+    // deletes the entire root qdisc you installed (netem and the filter were both children of that root thus, removing them as well)
+    if (system("sudo tc qdisc del dev lo root") != 0) {
+        ROS_WARN("[FAIL_SIM] failed deleting root qdisc");
+    }
+    ROS_INFO("[FAIL_SIM] connection restored");
+}
+
+void network_thread() {
+    while (ros::ok()) {
+        if (!processed_request && current_mode != Mode::Normal) {
+            {
+                std::lock_guard<std::mutex> lock(mtx);  
+                current_duration = failure_request.failure_duration; 
+            }
+            dropout(current_duration);
+            processed_request = true; 
+        }
+        // prevent busy-spin
+        std::this_thread::sleep_for(std::chrono::milliseconds(50)); 
+    }
+}
+
 int main(int argc, char **argv) {
 
     ros::init(argc, argv, "failure_sim_node");
@@ -113,15 +147,12 @@ int main(int argc, char **argv) {
     // runs the terminal input function in a seperate thread to not block the ROS loop
     std::thread input_thread(terminal_thread);
 
-    ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
-        ("mavros/state", 10, state_cb);
-    ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
-        ("mavros/local_position/pose", 10, pose_cb);
+    // detach() allows fail_sim_thread to not block the main thread when it calls sleep()
+    std::thread fail_sim_thread(network_thread);
     
     ros::Rate rate(20.0);
 
     double current_duration = 0.0; 
-    ros::Time last_request = ros::Time::now(); 
     ROS_INFO("[FAIL_SIM] failure simulation setting up...");
 
     while(ros::ok()) {
@@ -131,38 +162,30 @@ int main(int argc, char **argv) {
             current_mode = failure_request.mode; 
             current_duration = failure_request.failure_duration; 
             failure_request.last_request = ros::Time::now();
-            last_request = ros::Time::now(); 
             incoming_request = false; 
+            processed_request = false; 
         }
         switch (current_mode) {
             case Mode::Normal: 
             // prints every x seconds
                 ROS_INFO_THROTTLE(4.0, "[FAIL_SIM] manual control...");
-                // intermediate_pose_pub.publish(current_pose);
-                // intermediate_state_pub.publish(current_state);
                 break;
             // in dropouts, intentionally publish nothing
             case Mode::Short_Dropout: 
                 ROS_INFO_THROTTLE(1.0, "[FAIL_SIM] performing short dropout...");
-                if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
+                if (processed_request) {
                     ROS_INFO("[FAIL_SIM] short dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
             case Mode::Long_Dropout:
                 ROS_INFO_THROTTLE(1.0, "[FAIL_SIM] performing long dropout...");
-                if (ros::Time::now() - last_request > ros::Duration(current_duration)) {
+                if (processed_request) {
                     ROS_INFO("[FAIL_SIM] long dropout of %fs complete...", current_duration);
                     current_mode = Mode::Normal; 
                 }
                 break;
-            case Mode::Burst_Short_Dropout: 
-                break;
-            case Mode::Burst_Long_Dropout: 
-                break;
-            case Mode::Command_Degradation: 
-                break;
-            case Mode::State_Degradation: 
+            case Mode::Latency: 
                 break;
         }
         ros::spinOnce();
@@ -174,5 +197,9 @@ int main(int argc, char **argv) {
         // waits for input_thread to finish (a thread may only be joined once)
         input_thread.join();
     }
+    if (fail_sim_thread.joinable()) {
+        fail_sim_thread.join();
+    }
+    system("sudo tc qdisc del dev lo root 2>/dev/null || true");
     return 0; 
 }

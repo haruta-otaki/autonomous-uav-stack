@@ -5,6 +5,7 @@
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
+#include <mavros_msgs/RCIn.h>
 
 #include <sensor_msgs/BatteryState.h>
 
@@ -97,7 +98,8 @@ supervisor::FailureMode failure_mode_msg;
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
 geometry_msgs::PoseStamped command_pose; 
-sensor_msgs::BatteryState current_battery; 
+sensor_msgs::BatteryState current_battery;
+bool received_rc = false; 
 Watchdog pose_watchdog(0.4, 0.8);
 
 // callback that saves the currfailure_mode_msgent state of the autopilot 
@@ -117,6 +119,13 @@ void offboard_pose_cb(const geometry_msgs::PoseStamped::ConstPtr& msg){
 
 void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
     current_battery = *msg;
+}
+
+void rc_cb(const mavros_msgs::RCIn::ConstPtr& msg){
+    // signal strength (0-255, 0 = no signal, RC Lost)
+    // pointer->member is equivalent to (*pointer).member
+    received_rc = msg->rssi > 0; 
+    pose_watchdog.feed();
 }
 
 // a topic is continuous streaming
@@ -251,10 +260,13 @@ int main(int argc, char **argv) {
                             ROS_INFO("[SUPERVISOR] landing(smart)...");
                             current_mode = Mode::Smart_Land;
                             failure_mode_msg.mode = supervisor::FailureMode::SMART_LAND; 
-                        } else {
+                        } else if (fallback_mode == "smart_rtl") {
                             ROS_INFO("[SUPERVISOR] returning(smart)...");
                             current_mode = Mode::Smart_RTL;
                             failure_mode_msg.mode = supervisor::FailureMode::SMART_RTL; 
+                        } else {
+                            ROS_WARN("[SUPERVISOR] no fallback mode selected...");
+                            ROS_INFO("[SUPERVISOR] prestreaming...");
                         }
                     }
                 }
