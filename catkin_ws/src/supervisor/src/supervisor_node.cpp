@@ -178,7 +178,6 @@ int main(int argc, char **argv) {
     
     std::string fallback_mode; 
     nh_private.param("fallback_mode", fallback_mode, std::string(""));
-    ROS_INFO_STREAM("[SUPERVISOR] fallback_mode = '" << fallback_mode << "'");
 
     // update the machine states
     std::vector<MachineState> states = {

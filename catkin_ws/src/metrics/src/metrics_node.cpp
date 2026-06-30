@@ -37,9 +37,6 @@ public:
         creation = true;
         creation_time = ros::Time::now();
         file.open(file_path);
-        if(!file.is_open()) {
-            ROS_ERROR_STREAM("file cannot be opened " << file_path);
-        }
         // columns
         file <<  "time,event,mode,x,y,z,battery,details\n";
         ROS_INFO("[METRICS] logging...");
@@ -137,9 +134,6 @@ int main(int argc, char **argv) {
     nh_private.param("failure_mode", failure_mode, std::string(""));
     nh_private.param("fallback_mode", fallback_mode, std::string(""));
     nh_private.param("metrics_path", metrics_path, std::string(""));
-    ROS_INFO_STREAM("[METRICS] trial_id = '" << trial_id << "'");
-    ROS_INFO_STREAM("[METRICS] failure_mode = '" << failure_mode << "'");
-    ROS_INFO_STREAM("[METRICS] fallback_mode = '" << fallback_mode << "'");
 
     ros::Rate rate(20.0);
 
@@ -169,14 +163,17 @@ int main(int argc, char **argv) {
         failure_start = current_mode == "OFFBOARD" && last_mode != "OFFBOARD"; 
         failure_end = last_mode == "OFFBOARD" && (current_mode == "AUTO.LOITER" || current_mode == "POSCTL");
         if (current_mode == "AUTO.TAKEOFF" && !takeoff) {
+            ROS_INFO("[METRICS] logging takeoff...");
             logger.write("Mission Start", current_mode, current_pose, current_battery, "");
             takeoff = true;
         } else if (current_mode == "AUTO.LAND" && !land) {
+            ROS_INFO("[METRICS] logging landing...");
             logger.write("Mission Complete", current_mode, current_pose, current_battery, "");
             land = true; 
         }
         else if (current_mode == "AUTO.LOITER" || current_mode == "POSTCTL") {
             if (failure_end) {
+                ROS_INFO("[METRICS] logging failure completion...");
                 failure_duration = (ros::Time::now() - failure_time).toSec();
                 std::stringstream detail = log_detail();
                 detail << std::fixed << std::setprecision(3) 
@@ -185,6 +182,7 @@ int main(int argc, char **argv) {
             }
         } else {
             if (failure_start) {
+                ROS_INFO("[METRICS] logging failure start...");
                 failure_time = ros::Time::now();
                 std::stringstream detail = log_detail();
                 logger.write("Failure Start", current_mode, current_pose, current_battery, detail.str());
