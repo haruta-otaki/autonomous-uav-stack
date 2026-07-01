@@ -100,4 +100,5 @@
     <!-- set PX4 failsafe timeouts - waits for MAVROS connection before setting -->
     <node pkg="offboard_control" type="set_px4_params.py" name="set_px4_params" output="screen"/>
     <node pkg="offboard_control" type="offboard_control_node" name="offboard_control_node" output="screen"/>
+    <node pkg="rtl" type="rtl_node" name="rtl_node" output="screen"/>
 </launch>

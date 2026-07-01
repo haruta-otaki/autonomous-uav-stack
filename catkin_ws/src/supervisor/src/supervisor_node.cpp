@@ -351,6 +351,13 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
+                if (fallback_done) {
+                    ROS_INFO("[SUPERVISOR] fallback completed...");
+                    ROS_INFO("[SUPERVISOR] landing...");
+                    current_mode = Mode::Land; 
+                } else {
+                    local_pos_pub.publish(command_pose);
+                }
                 break;
             case Mode::Smart_RTL:
                 if (current_state.mode != "OFFBOARD" && 
@@ -360,6 +367,13 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
+                if (fallback_done) {
+                    ROS_INFO("[SUPERVISOR] fallback completed...");
+                    ROS_INFO("[SUPERVISOR] landing...");
+                    current_mode = Mode::Land; 
+                } else {
+                    local_pos_pub.publish(command_pose);
+                }
                 break;
         }
 

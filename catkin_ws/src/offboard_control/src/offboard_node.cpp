@@ -183,9 +183,7 @@ int main(int argc, char **argv) {
             }
             switch (current_mode) {
                 case Mode::Offboard:
-                    // comment out the arm logic it is assumed the drone is already armed and manually controlled
-                    if (current_state.mode == "OFFBOARD" && 
-                    (ros::Time::now() - last_request > ros::Duration(0.5))) {
+                    if (current_state.mode == "OFFBOARD") {
                         mode_index = find_waypoint(current_pose, states);
                         current_mode = states[mode_index].mode;
                         ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
