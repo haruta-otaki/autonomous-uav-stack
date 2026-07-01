@@ -102,7 +102,7 @@ bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamp
 // offboard mode is defined as a mode in which the drone is controlled by an external computer (ros node)
 int main(int argc, char **argv) {
     // starts ros node
-    ros::init(argc, argv, "offboard_control_node");
+    ros::init(argc, argv, "rtl_node");
     // node's access point to ros
     ros::NodeHandle nh;
 
@@ -137,10 +137,11 @@ int main(int argc, char **argv) {
     double tol = 0.3; 
 
     bool record = false; 
+    // maximum waypoint age
     double record_interval = 5.0; 
+    // minimum distance threshold
     double record_distance = 0.5; 
     ros::Time last_record_time = ros::Time::now(); 
-    double last_record_distance = 0.0; 
 
     bool new_failure = false; 
 
@@ -156,13 +157,21 @@ int main(int argc, char **argv) {
         if (current_failure_mode.mode == supervisor::FailureMode::SMART_RTL) {
             // retrace
             if (!new_failure) {
-                waypoint = trail.top();
-                trail.pop();
-                ROS_INFO("[RTL_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                    waypoint.pose.position.x,
-                    waypoint.pose.position.y,
-                    waypoint.pose.position.z);
-                new_failure = true; 
+                // in consecutive failures, restart mission and find waypoint again
+                if (trail.empty()) {
+                    ROS_WARN("[RTL_NODE] trail empty, cannot retrace");
+                    std_msgs::Bool msg;
+                    msg.data = true;
+                    supervisor_completion_pub.publish(msg);
+                } else {
+                    waypoint = trail.top();
+                    trail.pop();
+                    ROS_INFO("[RTL_NODE] navigating to waypoint: (%.2f, %.2f, %.2f)", 
+                        waypoint.pose.position.x,
+                        waypoint.pose.position.y,
+                        waypoint.pose.position.z);
+                    new_failure = true; 
+                }
             }
 
             if (dwell(dwelling, dwell_start_time, waypoint, tol)) {
@@ -184,27 +193,30 @@ int main(int argc, char **argv) {
                 }
             }
 
-            if (trail.size() >= 0) {
-                // continue sending the requested pose at the appropriate rate 
-                // interpolation set at 5cm / tick (1 m/s)
-                command_pose = interpolation(command_pose, waypoint, 0.05);
-                supervisor_pose_pub.publish(command_pose);
-            }
+            // continue sending the requested pose at the appropriate rate 
+            // interpolation set at 5cm / tick (1 m/s)
+            command_pose = interpolation(command_pose, waypoint, 0.05);
+            supervisor_pose_pub.publish(command_pose);
         } else {
-            // record 
-            current_distance = find_distance(current_pose, trail.top());
-            record = (ros::Time::now() - last_record_time).toSec() > record_interval || current_distance - last_record_distance > record_distance;
-            if (record && trail.size() < QUEUE_SIZE) {
-                trail.push(current_pose);
-                ROS_INFO("[OFFB_NODE] trail recorded: size=%zu pose=(%.2f,%.2f,%.2f)",
-                    trail.size(),
-                    current_pose.pose.position.x,
-                    current_pose.pose.position.y,
-                    current_pose.pose.position.z);
-                last_record_distance = 0.0; 
-                last_record_time = ros::Time::now();
+            //filter
+            if (received_pose) {
+                // distance based recording
+                if (trail.empty()) {
+                    current_distance = find_distance(current_pose, trail.top());
+                    record = (ros::Time::now() - last_record_time).toSec() > record_interval || current_distance > record_distance;
+                }
+
+                if (trail.empty() || (record && trail.size() < QUEUE_SIZE)) {
+                    trail.push(current_pose);
+                    ROS_INFO("[OFFB_NODE] trail recorded: size=%zu pose=(%.2f,%.2f,%.2f)",
+                        trail.size(),
+                        current_pose.pose.position.x,
+                        current_pose.pose.position.y,
+                        current_pose.pose.position.z);
+                    last_record_time = ros::Time::now();
+                }
+                new_failure = false; 
             }
-            new_failure = false; 
         }
 
         //keeps the loop at 20 Hz
