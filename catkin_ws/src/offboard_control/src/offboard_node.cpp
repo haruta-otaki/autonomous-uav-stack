@@ -142,8 +142,10 @@ int main(int argc, char **argv) {
     ros::Subscriber mode_sub = nh.subscribe<supervisor::FailureMode>
         ("supervisor/failure_mode", 10, mode_cb);
     
+    // set latch=true such that ROS remembers the last message that was published,
+    // and automatically send it to any new subscriber that connects later
     ros::Publisher supervisor_completion_pub =
-    nh.advertise<std_msgs::Bool>("/supervisor/land_permission", 1, true);
+    nh.advertise<std_msgs::Bool>("/supervisor/completion", 1, true);
 
     // publishes the commanded local position (relative to local origin)
     ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
@@ -174,6 +176,7 @@ int main(int argc, char **argv) {
     // while ros is running normally... 
     while(ros::ok()) {
         if (current_failure_mode.mode == supervisor::FailureMode::CONTINUE) {
+            // in consecutive failures, restart mission and find waypoint again
             if (!new_failure) {
                 current_mode = Mode::Offboard;
                 new_failure = true; 
@@ -183,41 +186,55 @@ int main(int argc, char **argv) {
                     // comment out the arm logic it is assumed the drone is already armed and manually controlled
                     if (current_state.mode == "OFFBOARD" && 
                     (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                        ROS_INFO("[OFFB_NODE] hovering...");
                         mode_index = find_waypoint(current_pose, states);
                         current_mode = states[mode_index].mode;
+                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            states[mode_index].pose.pose.position.x,
+                            states[mode_index].pose.pose.position.y,
+                            states[mode_index].pose.pose.position.z);
                     }
                     break;
                 case Mode::Waypoint_0:
                     if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                            ROS_INFO("[OFFB_NODE] dwelling completed");
-                            ROS_INFO("[OFFB_NODE] hovering(1)...");
-                            dwelling = false; 
-                            mode_index += 1; 
-                            current_mode = Mode::Waypoint_1;
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        dwelling = false; 
+                        mode_index += 1; 
+                        current_mode = Mode::Waypoint_1;
+                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            states[mode_index].pose.pose.position.x,
+                            states[mode_index].pose.pose.position.y,
+                            states[mode_index].pose.pose.position.z);
                         
                     }
                     break;
                 case Mode::Waypoint_1: 
                     // handleMode(current_mode);
                     if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                            ROS_INFO("[OFFB_NODE] dwelling completed");
-                            ROS_INFO("[OFFB_NODE] hovering(2)...");
-                            dwelling = false; 
-                            mode_index += 1; 
-                            current_mode = Mode::Waypoint_2;
-                        
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        dwelling = false; 
+                        mode_index += 1; 
+                        current_mode = Mode::Waypoint_2;
+                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            states[mode_index].pose.pose.position.x,
+                            states[mode_index].pose.pose.position.y,
+                            states[mode_index].pose.pose.position.z);
                     }
 
                     break;
                 case Mode::Waypoint_2: 
                     if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                            ROS_INFO("[OFFB_NODE] dwelling completed");
-                            ROS_INFO("[OFFB_NODE] hovering(3)...");
-                            dwelling = false; 
-                            mode_index += 1; 
-                            current_mode = Mode::Waypoint_3;
-                        
+                        ROS_INFO("[OFFB_NODE] dwelling completed");
+                        dwelling = false; 
+                        mode_index += 1; 
+                        current_mode = Mode::Waypoint_3;
+                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            states[mode_index].pose.pose.position.x,
+                            states[mode_index].pose.pose.position.y,
+                            states[mode_index].pose.pose.position.z);
                     }
                     break;
                 case Mode::Waypoint_3: 
@@ -225,11 +242,14 @@ int main(int argc, char **argv) {
                             ROS_INFO("[OFFB_NODE] dwelling completed");
                             ROS_INFO("[OFFB_NODE] landing...");
                             dwelling = false; 
-                            mode_index += 1; 
                             // send supervisor a "done" message 
                             std_msgs::Bool msg; 
                             msg.data = true; 
-                            supervisor_completion_pub.publish(msg);
+                            supervisor_completion_pub.publish(msg);                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            states[mode_index].pose.pose.position.x,
+                            states[mode_index].pose.pose.position.y,
+                            states[mode_index].pose.pose.position.z);
                     }
                     break;
             }

@@ -10,6 +10,7 @@
 // RC_CHANNELS for physical RC hardware
 // #include <mavros_msgs/RCIn.h>
 
+#include <std_msgs/Bool.h>
 #include <sensor_msgs/BatteryState.h>
 
 // include custom message
@@ -101,6 +102,15 @@ geometry_msgs::PoseStamped command_pose;
 sensor_msgs::BatteryState current_battery;
 bool received_rc = false; 
 Watchdog rc_watchdog(0.4, 0.8);
+bool fallback_done = false;
+
+void fallback_cb(const std_msgs::Bool::ConstPtr& msg)
+{
+    if (msg->data) {
+        fallback_done = true;
+        ROS_INFO("[SUPERVISOR] fallback done");
+    }
+}
 
 // callback that saves the currfailure_mode_msgent state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -158,6 +168,9 @@ int main(int argc, char **argv) {
 
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
         ("mavros/battery", 10, battery_cb);
+
+    ros::Subscriber fallback_sub = nh.subscribe("/supervisor/completion", 10, fallback_cb);
+
         
     // publishes the commanded local position (relative to local origin)
     ros::Publisher local_pos_pub = nh.advertise<geometry_msgs::PoseStamped> 
@@ -235,6 +248,8 @@ int main(int argc, char **argv) {
                     rc_watchdog.tick();
                     if (!rc_watchdog.is_healthy()) {
                         ROS_INFO_STREAM("[SUPERVISOR] fallback_mode = '" << fallback_mode << "'");
+                        fallback_done = false; 
+                        command_pose = current_pose;
                         if (fallback_mode == "hover") {
                             ROS_INFO("[SUPERVISOR] hovering...");
                             current_mode = Mode::Hover;
@@ -309,7 +324,13 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
-                local_pos_pub.publish(command_pose);
+                if (fallback_done) {
+                    ROS_INFO("[SUPERVISOR] fallback completed...");
+                    ROS_INFO("[SUPERVISOR] landing...");
+                    current_mode = Mode::Land; 
+                } else {
+                    local_pos_pub.publish(command_pose);
+                }
                 break;
             case Mode::Smart_Hover:
                 if (current_state.mode != "OFFBOARD" && 
