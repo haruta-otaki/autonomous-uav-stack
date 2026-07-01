@@ -165,6 +165,7 @@ int main(int argc, char **argv) {
 
     while(ros::ok()) {
         current_mode = current_failure_mode.mode;
+        // logic to account for combination
         failure_start = current_mode != supervisor::FailureMode::PRESTREAM && last_mode == supervisor::FailureMode::PRESTREAM; 
         failure_end = current_mode == supervisor::FailureMode::PRESTREAM && last_mode != supervisor::FailureMode::PRESTREAM; 
         if (current_state.armed && !last_armed) {

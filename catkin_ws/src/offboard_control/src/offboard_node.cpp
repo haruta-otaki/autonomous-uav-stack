@@ -6,28 +6,22 @@
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
 
-#include <sensor_msgs/BatteryState.h>
-
 #include <supervisor/FailureMode.h>
+
+#include <std_msgs/Bool.h>
 
 #include <string>
 #include <vector>
 #include <limits>
 
-const int FIRST_WAYPOINT_INDEX = 3; // exclude offboard protocols
-const int LAST_WAYPOINT_INDEX = 7; // exclude halt
 // FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
 enum class Mode {
-    Init, 
-    Prestream, 
     Offboard, 
     // Simplify to Waypoint, to make custom messages 
     Waypoint_0,
     Waypoint_1,
     Waypoint_2,
     Waypoint_3,
-    Land,
-    Halt
 };
 
 struct MachineState {
@@ -51,7 +45,6 @@ bool received_pose = false;
 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
-sensor_msgs::BatteryState current_battery; 
 
 // callback that saves the current state of the autopilot 
 void state_cb(const mavros_msgs::State::ConstPtr& msg){
@@ -88,12 +81,12 @@ geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geo
 }
 
 int find_waypoint(geometry_msgs::PoseStamped current, std::vector<MachineState> states) {
-    int index = FIRST_WAYPOINT_INDEX; 
+    int index = 0; 
 
     double minimum_d = std::numeric_limits<double>::max();
-    int n = LAST_WAYPOINT_INDEX; 
+    int n = states.size(); 
     // temporarily hard coded 
-    for (int i = FIRST_WAYPOINT_INDEX; i < n; i++) {
+    for (int i = 0; i < n; i++) {
         double dx = states[i].pose.pose.position.x - current.pose.position.x;
         double dy = states[i].pose.pose.position.y - current.pose.position.y;
         double dz = states[i].pose.pose.position.z - current.pose.position.z;
@@ -144,46 +137,35 @@ int main(int argc, char **argv) {
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
     ros::Subscriber pose_sub = nh.subscribe<geometry_msgs::PoseStamped>
-        ("supervisor/intermediate_mavros_pose", 10, pose_cb);
+        ("mavros/local_position/pose", 10, pose_cb);
+
     ros::Subscriber mode_sub = nh.subscribe<supervisor::FailureMode>
         ("supervisor/failure_mode", 10, mode_cb);
+    
+    ros::Publisher supervisor_completion_pub =
+    nh.advertise<std_msgs::Bool>("/supervisor/land_permission", 1, true);
 
     // publishes the commanded local position (relative to local origin)
     ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("supervisor/intermediate_offboard_pose", 10);   
 
-    // clients that request arming and mode changes
-    // mavros prefix depend on the name given to the node in .launch file
-    ros::ServiceClient arming_client = nh.serviceClient<mavros_msgs::CommandBool>
-        ("mavros/cmd/arming");
-    ros::ServiceClient set_mode_client = nh.serviceClient<mavros_msgs::SetMode>
-        ("mavros/set_mode");
-    
     // setpoint publishing rate must be faster than 2 Hz 
     // PX4 has a timeout of 500 ms between two offboard commands, and fall backs to the last mode if timeout is exceeded 
     // recommended to enter offboard mode from position mode
     ros::Rate rate(20.0);
 
     std::vector<MachineState> states = {
-        MachineState(0.0, 0.0, 2.0, Mode::Offboard), 
-        MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), 
-        MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3), MachineState(-15.0, 15.0, 0.3, Mode::Land), MachineState(-15.0, 15.0, 0.3, Mode::Halt)
+        MachineState(0.0, 0.0, 2.0, Mode::Offboard), MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), 
+        MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3)
     };
 
     int mode_index = 0;
-    int index = 3; 
     bool dwelling = false; 
     bool new_failure = false; 
     double tol = 0.3; 
 
-    mavros_msgs::SetMode offboard_set_mode; 
-    mavros_msgs::SetMode land_set_mode; 
-
     ros::Time last_request = ros::Time::now();
     ros::Time dwell_start_time = ros::Time::now();
-
-    // currently unused 
-    mavros_msgs::CommandBool arm_cmd; 
     
     ROS_INFO("[OFFB_NODE] initializing...");
     Mode current_mode;
@@ -202,30 +184,11 @@ int main(int argc, char **argv) {
                     if (current_state.mode == "OFFBOARD" && 
                     (ros::Time::now() - last_request > ros::Duration(0.5))) {
                         ROS_INFO("[OFFB_NODE] hovering...");
-                        index = find_waypoint(current_pose, states);
-                        mode_index = index; 
-                        current_mode = states[index].mode;
+                        mode_index = find_waypoint(current_pose, states);
+                        current_mode = states[mode_index].mode;
                     }
-                    // else {
-                    //     // arm the quad to allow it to fly (spin motors & apply actuator outputs)
-                    //     if (!current_state.armed && 
-                    //         (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                    //         // asks to arm the vehicle && checks mavros' consequential action
-                    //         if (arming_client.call(arm_cmd) && arm_cmd.response.success) {
-                    //             ROS_INFO("[OFFB_NODE] vehicle armed");
-                    //         }
-                    //         last_request = ros::Time::now();
-                    //     }
-                    //     if (current_state.armed && 
-                    //         (ros::Time::now() - last_request > ros::Duration(0.5))) {
-                    //         ROS_INFO("[OFFB_NODE] hovering...");
-                    //         index = find_waypoint(current_pose, waypoints, modes);
-                    //         mode_index = index; 
-                    //         current_mode = states[index].mode;
-                    //     }
-                    // }
                     break;
-                    case Mode::Waypoint_0:
+                case Mode::Waypoint_0:
                     if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                             ROS_INFO("[OFFB_NODE] dwelling completed");
                             ROS_INFO("[OFFB_NODE] hovering(1)...");
@@ -263,34 +226,14 @@ int main(int argc, char **argv) {
                             ROS_INFO("[OFFB_NODE] landing...");
                             dwelling = false; 
                             mode_index += 1; 
-                            current_mode = Mode::Land;
-                        
+                            // send supervisor a "done" message 
+                            std_msgs::Bool msg; 
+                            msg.data = true; 
+                            supervisor_completion_pub.publish(msg);
                     }
-                    break;
-                case Mode::Land: 
-                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                            ROS_INFO("[OFFB_NODE] dwelling completed");
-                            ROS_INFO("[OFFB_NODE] halting...");
-                            dwelling = false; 
-                            mode_index += 1; 
-                            current_mode = Mode::Halt;
-                        
-                    }
-                    break;
-                case Mode::Halt: 
-                    land_set_mode.request.custom_mode = "AUTO.LAND";
-                    if (current_state.mode != "AUTO.LAND" && 
-                    (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                        // asks to switch to offboard mode and checks if mavros sent mode-change request to px4
-                        if (set_mode_client.call(land_set_mode) && land_set_mode.response.mode_sent) {
-                            ROS_INFO("[OFFB_NODE] landing enabled");
-                        }
-                        last_request = ros::Time::now();
-                    } 
-                    
                     break;
             }
-            if (mode_index > 1 && mode_index < states.size()) {
+            if (mode_index >= 0 && mode_index < states.size()) {
                 // continue sending the requested pose at the appropriate rate 
                 // interpolation set at 5cm / tick (1 m/s)
                 command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);

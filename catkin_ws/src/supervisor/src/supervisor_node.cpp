@@ -190,9 +190,9 @@ int main(int argc, char **argv) {
     std::string fallback_mode; 
     nh_private.param("fallback_mode", fallback_mode, std::string(""));
 
-    // update the machine states
+    // start and end of mission 
     std::vector<MachineState> states = {
-        MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(0.0, 0.0, 2.0, Mode::Prestream), MachineState(-15.0, 15.0, 0.3, Mode::Land)
+        MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(-15.0, 15.0, 2.0, Mode::Land)
     };
 
     int mode_index = 0; 
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
     
     ROS_INFO("[SUPERVISOR] initializing...");
     Mode current_mode = Mode::Init;
-    command_pose = states[0].pose;
+    command_pose = states[mode_index].pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
