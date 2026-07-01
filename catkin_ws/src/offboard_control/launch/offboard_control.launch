@@ -74,8 +74,12 @@
             /mavros/setpoint_position/local
             /mavros/setpoint_raw/local
             /mavros/rc/in
+            /mavros/manual_control/control
             /mavros/battery
             /mavros/extended_state
+            /supervisor/failure_mode
+            /supervisor/intermediate_offboard_pose
+            /supervisor/completion
             /tf
             /tf_static
             /rosout"/>
@@ -95,4 +99,5 @@
     <!-- waits for MAVROS connection before setting -->
     <!-- set PX4 failsafe timeouts - waits for MAVROS connection before setting -->
     <node pkg="offboard_control" type="set_px4_params.py" name="set_px4_params" output="screen"/>
+    <node pkg="offboard_control" type="offboard_control_node" name="offboard_control_node" output="screen"/>
 </launch>

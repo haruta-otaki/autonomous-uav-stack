@@ -169,7 +169,8 @@ int main(int argc, char **argv) {
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
         ("mavros/battery", 10, battery_cb);
 
-    ros::Subscriber fallback_sub = nh.subscribe("/supervisor/completion", 10, fallback_cb);
+    ros::Subscriber fallback_sub = nh.subscribe<std_msgs::Bool>
+        ("/supervisor/completion", 10, fallback_cb);
 
         
     // publishes the commanded local position (relative to local origin)
@@ -244,6 +245,7 @@ int main(int argc, char **argv) {
             case Mode::Prestream:
                 ROS_INFO_THROTTLE(4.0, "[SUPERVISOR] prestreaming...");
                 local_pos_pub.publish(current_pose);
+                // prevent watchdog from triggering at launch
                 if (received_rc) {
                     rc_watchdog.tick();
                     if (!rc_watchdog.is_healthy()) {
@@ -360,6 +362,8 @@ int main(int argc, char **argv) {
                 } 
                 break;
         }
+
+        // allow interuption to all modes except landing when connection is restored
         recovery_eligible = current_mode != Mode::Land && current_mode != Mode::Smart_Land;
 
         if (rc_watchdog.is_healthy() && current_mode != Mode::Prestream && recovery_eligible) {
