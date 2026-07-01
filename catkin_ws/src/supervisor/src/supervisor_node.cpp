@@ -5,7 +5,10 @@
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
 #include <mavros_msgs/State.h>
-#include <mavros_msgs/RCIn.h>
+#include <mavros_msgs/ManualControl.h>
+
+// RC_CHANNELS for physical RC hardware
+// #include <mavros_msgs/RCIn.h>
 
 #include <sensor_msgs/BatteryState.h>
 
@@ -116,13 +119,15 @@ void battery_cb(const sensor_msgs::BatteryState::ConstPtr& msg){
     current_battery = *msg;
 }
 
-void rc_cb(const mavros_msgs::RCIn::ConstPtr& msg){
-    if (msg->rssi > 0) {
-        // signal strength (0-255, 0 = no signal, RC Lost)
-        // pointer->member is equivalent to (*pointer).member
-        received_rc = true; 
-        rc_watchdog.feed();
-    } 
+// QGC's virtual joystick runs on a computer using MANUAL_CONTROL, a MAVLink message designed 
+// for a ground station sending manual control inputs over the datalink rather than via a dedicated RC radio
+void rc_cb(const mavros_msgs::ManualControl::ConstPtr& msg){
+    // condition necessary for real RC 
+    // signal strength (0-255, 0 = no signal, RC Lost)
+    // pointer->member is equivalent to (*pointer).member
+    // if (msg->rssi > 0) {} 
+    received_rc = true; 
+    rc_watchdog.feed();
 }
 
 // a topic is continuous streaming
@@ -141,8 +146,8 @@ int main(int argc, char **argv) {
     ros::Subscriber state_sub = nh.subscribe<mavros_msgs::State>
         ("mavros/state", 10, state_cb);
 
-    ros::Subscriber rc_sub = nh.subscribe<mavros_msgs::RCIn>
-        ("mavros/rc/in", 10, rc_cb);
+    ros::Subscriber rc_sub = nh.subscribe<mavros_msgs::ManualControl>
+        ("mavros/manual_control/control", 10, rc_cb);
 
     // placeholder, reconsider 
     ros::Subscriber mavros_pose_sub = nh.subscribe<geometry_msgs::PoseStamped>

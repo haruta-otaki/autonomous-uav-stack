@@ -92,9 +92,7 @@
     </node>
 
     <!-- set COM_RC_LOSS_T and COM_DL_LOSS_T values to isolate supervisor behavior from PX4 firmware failsafes -->
-    <node pkg="mavros" type="mavparam" name="set_rc_loss_timeout" output="screen"
-      args="set COM_RC_LOSS_T 60.0"/>
-    <node pkg="mavros" type="mavparam" name="set_dl_loss_timeout" output="screen"
-      args="set COM_DL_LOSS_T 60.0"/>
-
+    <!-- waits for MAVROS connection before setting -->
+    <!-- set PX4 failsafe timeouts - waits for MAVROS connection before setting -->
+    <node pkg="offboard_control" type="set_px4_params.py" name="set_px4_params" output="screen"/>
 </launch>
