@@ -93,7 +93,7 @@ bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamp
     
 
     return at_waypoint(waypoint, tol) && vehicle_stability() && dwelling && 
-        (ros::Time::now() - dwell_start_time > ros::Duration(2.0));
+        (ros::Time::now() - dwell_start_time > ros::Duration(0.5));
 }
 
 
