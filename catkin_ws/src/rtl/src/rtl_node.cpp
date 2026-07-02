@@ -13,7 +13,8 @@
 #include <string>
 #include <vector>
 #include <limits>
-#include <stack>
+#include <deque>
+#include <random>
 
 // global variables
 bool received_pose = false; 
@@ -22,7 +23,7 @@ geometry_msgs::PoseStamped current_pose;
 supervisor::FailureMode current_failure_mode; 
 double current_distance = 0.0; 
 const int QUEUE_SIZE = 500; 
-std::stack<geometry_msgs::PoseStamped> trail; 
+std::deque<geometry_msgs::PoseStamped> trail; 
 
 geometry_msgs::PoseStamped create_pose(double x, double y, double z) {
     geometry_msgs::PoseStamped pose; 
@@ -95,6 +96,16 @@ bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamp
         (ros::Time::now() - dwell_start_time > ros::Duration(2.0));
 }
 
+
+std::random_device rd; 
+std::mt19937 gen(rd());
+
+// placeholder 
+int random_index(int min, int max) {
+    std::uniform_int_distribution<int> dist(min, max);
+    return dist(gen);
+}
+
 // a topic is continuous streaming
 // a service is request / response
 
@@ -164,14 +175,14 @@ int main(int argc, char **argv) {
                     msg.data = true;
                     supervisor_completion_pub.publish(msg);
                 } else {
-                    waypoint = trail.top();
-                    trail.pop();
+                    waypoint = trail.back();
+                    trail.pop_back();
                     ROS_INFO("[RTL_NODE] navigating to waypoint: (%.2f, %.2f, %.2f)", 
                         waypoint.pose.position.x,
                         waypoint.pose.position.y,
                         waypoint.pose.position.z);
-                    new_failure = true; 
                 }
+                new_failure = true; 
             }
 
             if (dwell(dwelling, dwell_start_time, waypoint, tol)) {
@@ -179,12 +190,13 @@ int main(int argc, char **argv) {
                 ROS_INFO("[RTL_NODE] landing...");
                 dwelling = false; 
                 if (trail.size() == 0) {
+                    waypoint = states[0];
                     std_msgs::Bool msg; 
                     msg.data = true; 
                     supervisor_completion_pub.publish(msg);   
                 } else {
-                    waypoint = trail.top();
-                    trail.pop();
+                    waypoint = trail.back();
+                    trail.pop_back();
                     ROS_INFO("[RTL_NODE] navigating to waypoint: (%.2f, %.2f, %.2f)", 
                     waypoint.pose.position.x,
                     waypoint.pose.position.y,
@@ -201,13 +213,16 @@ int main(int argc, char **argv) {
             //filter
             if (received_pose) {
                 // distance based recording
-                if (trail.empty()) {
-                    current_distance = find_distance(current_pose, trail.top());
+                if (!trail.empty()) {
+                    current_distance = find_distance(current_pose, trail.back());
                     record = (ros::Time::now() - last_record_time).toSec() > record_interval || current_distance > record_distance;
                 }
+                if (trail.size() >= QUEUE_SIZE) {
+                    trail.erase(trail.begin() + random_index(1, trail.size() - 1));
+                }
 
-                if (trail.empty() || (record && trail.size() < QUEUE_SIZE)) {
-                    trail.push(current_pose);
+                if (trail.empty() || record) {
+                    trail.push_back(current_pose);
                     ROS_INFO("[OFFB_NODE] trail recorded: size=%zu pose=(%.2f,%.2f,%.2f)",
                         trail.size(),
                         current_pose.pose.position.x,
@@ -215,8 +230,8 @@ int main(int argc, char **argv) {
                         current_pose.pose.position.z);
                     last_record_time = ros::Time::now();
                 }
-                new_failure = false; 
             }
+            new_failure = false; 
         }
 
         //keeps the loop at 20 Hz
