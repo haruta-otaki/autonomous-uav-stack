@@ -243,11 +243,12 @@ int main(int argc, char **argv) {
                             // send supervisor a "done" message 
                             std_msgs::Bool msg; 
                             msg.data = true; 
-                            supervisor_completion_pub.publish(msg);                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                            mode_index,
-                            states[mode_index].pose.pose.position.x,
-                            states[mode_index].pose.pose.position.y,
-                            states[mode_index].pose.pose.position.z);
+                            supervisor_completion_pub.publish(msg);                        
+                            ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                                mode_index,
+                                states[mode_index].pose.pose.position.x,
+                                states[mode_index].pose.pose.position.y,
+                                states[mode_index].pose.pose.position.z);
                     }
                     break;
             }

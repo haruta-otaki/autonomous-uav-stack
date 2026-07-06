@@ -84,19 +84,6 @@ bool vehicle_stability() {
     return current_state.connected && current_state.mode == "OFFBOARD" && current_state.armed;
 }
 
-// C++ passes by value using copy by default, thus references are made to manipulate the original dwell-related variables
-bool dwell(bool& dwelling, ros::Time& dwell_start_time, geometry_msgs::PoseStamped waypoint, double tol) {
-    if (!dwelling && at_waypoint(waypoint, tol)) {
-        dwelling = true; 
-        dwell_start_time = ros::Time::now();
-    }
-    
-
-    return at_waypoint(waypoint, tol) && vehicle_stability() && dwelling && 
-        (ros::Time::now() - dwell_start_time > ros::Duration(0.5));
-}
-
-
 std::random_device rd; 
 std::mt19937 gen(rd());
 
@@ -144,7 +131,6 @@ int main(int argc, char **argv) {
         create_pose(0.0, 0.0, 2.0), create_pose(-15.0, 15.0, 2.0)
     };
 
-    bool dwelling = false; 
     double tol = 0.3; 
 
     bool record = false; 
@@ -157,7 +143,6 @@ int main(int argc, char **argv) {
     bool new_failure = false; 
 
     ros::Time last_request = ros::Time::now();
-    ros::Time dwell_start_time = ros::Time::now();
     
     ROS_INFO("[RTL_NODE] initializing...");
     geometry_msgs::PoseStamped command_pose = states[0];
@@ -185,11 +170,10 @@ int main(int argc, char **argv) {
                 new_failure = true; 
             }
 
-            if (dwell(dwelling, dwell_start_time, waypoint, tol)) {
-                ROS_INFO("[RTL_NODE] dwelling completed");
-                ROS_INFO("[RTL_NODE] landing...");
-                dwelling = false; 
+            if (at_waypoint(waypoint, tol) && vehicle_stability()) {
+                ROS_INFO("[RTL_NODE] at waypoint");
                 if (trail.size() == 0) {
+                    ROS_INFO("[RTL_NODE] landing...");
                     waypoint = states[0];
                     std_msgs::Bool msg; 
                     msg.data = true; 
@@ -218,6 +202,7 @@ int main(int argc, char **argv) {
                     record = (ros::Time::now() - last_record_time).toSec() > record_interval || current_distance > record_distance;
                 }
                 if (trail.size() >= QUEUE_SIZE) {
+                    // remove random pose in trail 
                     trail.erase(trail.begin() + random_index(1, trail.size() - 1));
                 }
 
