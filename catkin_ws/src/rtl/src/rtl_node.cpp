@@ -131,13 +131,13 @@ int main(int argc, char **argv) {
         create_pose(0.0, 0.0, 2.0), create_pose(-15.0, 15.0, 2.0)
     };
 
-    double tol = 0.3; 
+    double tol = 0.15; 
 
     bool record = false; 
     // maximum waypoint age
     double record_interval = 5.0; 
     // minimum distance threshold
-    double record_distance = 0.5; 
+    double record_distance = 1.0; 
     ros::Time last_record_time = ros::Time::now(); 
 
     bool new_failure = false; 
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
     ros::Time last_request = ros::Time::now();
     
     ROS_INFO("[RTL_NODE] initializing...");
-    geometry_msgs::PoseStamped command_pose = states[0];
+    geometry_msgs::PoseStamped command_pose = current_pose;
     geometry_msgs::PoseStamped waypoint = states[0];
 
     // while ros is running normally... 
@@ -153,6 +153,7 @@ int main(int argc, char **argv) {
         if (current_failure_mode.mode == supervisor::FailureMode::SMART_RTL) {
             // retrace
             if (!new_failure) {
+                command_pose = current_pose;
                 // in consecutive failures, restart mission and find waypoint again
                 if (trail.empty()) {
                     ROS_WARN("[RTL_NODE] trail empty, cannot retrace");
@@ -208,7 +209,7 @@ int main(int argc, char **argv) {
 
                 if (trail.empty() || record) {
                     trail.push_back(current_pose);
-                    ROS_INFO("[OFFB_NODE] trail recorded: size=%zu pose=(%.2f,%.2f,%.2f)",
+                    ROS_INFO("[SMART_RTL] trail recorded: size=%zu pose=(%.2f,%.2f,%.2f)",
                         trail.size(),
                         current_pose.pose.position.x,
                         current_pose.pose.position.y,
