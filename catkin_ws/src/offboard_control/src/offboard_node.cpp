@@ -171,13 +171,14 @@ int main(int argc, char **argv) {
     
     ROS_INFO("[OFFB_NODE] initializing...");
     Mode current_mode;
-    geometry_msgs::PoseStamped command_pose = states[0].pose;
+    geometry_msgs::PoseStamped command_pose = current_pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
         if (current_failure_mode.mode == supervisor::FailureMode::CONTINUE) {
             // in consecutive failures, restart mission and find waypoint again
             if (!new_failure) {
+                command_pose = current_pose;
                 current_mode = Mode::Offboard;
                 new_failure = true; 
             }
