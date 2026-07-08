@@ -10,3 +10,6 @@ catkin_ws/install/
 
 # rosbag files 
 *.bag
+
+#cloned repositories 
+velodyne_simulator/
