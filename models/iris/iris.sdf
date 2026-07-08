@@ -78,12 +78,12 @@
       <!-- use 3D mesg as a visual -->
       <visual name='velodyne_base_visual_1'>
         <geometry>
-          <mesh><uri>model://velodyne_description/meshes/VLP16_base_1.dae</uri></mesh>
+          <mesh><uri>model://velodyne_VLP16/meshes/VLP16_base_1.dae</uri></mesh>
         </geometry>
       </visual>
       <visual name='velodyne_base_visual_2'>
         <geometry>
-          <mesh><uri>model://velodyne_description/meshes/VLP16_base_2.dae</uri></mesh>
+          <mesh><uri>model://velodyne_VLP16/meshes/VLP16_base_2.dae</uri></mesh>
         </geometry>
       </visual>
     </link>
@@ -103,7 +103,7 @@
       <visual name='velodyne_scan_visual'>
         <pose>0 0 -0.0377 0 0 0</pose>
         <geometry>
-          <mesh><uri>model://velodyne_description/meshes/VLP16_scan.dae</uri></mesh>
+          <mesh><uri>model://velodyne_VLP16/meshes/VLP16_scan.dae</uri></mesh>
         </geometry>
       </visual>
       <!-- add ray sensor -->
@@ -137,6 +137,7 @@
             <max>131.0</max>
             <resolution>0.001</resolution>
           </range>
+          <!-- noise is simulated in plugin -->
           <noise>
             <type>gaussian</type>
             <mean>0.0</mean>
