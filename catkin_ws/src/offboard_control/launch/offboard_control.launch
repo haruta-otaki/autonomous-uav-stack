@@ -102,6 +102,11 @@
     <node pkg="offboard_control" type="offboard_control_node" name="offboard_control_node" output="screen"/>
     <node pkg="rtl" type="rtl_node" name="rtl_node" output="screen"/>
     <arg name="rviz" default="true"/>
-     <node if="$(arg rviz)" pkg="rviz" type="rviz" name="$(anon rviz)" respawn="false" output="screen" args="-d $(find offboard_control)/velodyne.rviz" />
+
+    <!--  rviz -->
+    <node if="$(arg rviz)" pkg="rviz" type="rviz" name="$(anon rviz)" respawn="false" output="screen" args="-d $(find offboard_control)/velodyne.rviz" />
+
+    <!-- static transform from base_link to velodyne -->
+    <node pkg="tf2_ros" type="static_transform_publisher" name="velodyne_tf" args="0 0 0.1227 0 0 0 base_link velodyne"/>
 
 </launch>

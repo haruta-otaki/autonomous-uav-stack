@@ -31,4 +31,8 @@
   <arg name="rviz" default="true"/>
   <node if="$(arg rviz)" pkg="rviz" type="rviz" name="$(anon rviz)" respawn="false" output="screen" args="-d $(find velodyne_description)/rviz/example.rviz" />
 
+    <!-- TF transform for ground truth pose to input Octomap  -->
+  <node pkg="tf" type="odom_to_tf" name="odom_to_tf"
+      args="/ground_truth/pose base_link map"/>
+
 </launch>

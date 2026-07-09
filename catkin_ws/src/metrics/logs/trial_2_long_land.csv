@@ -1,4 +1,0 @@
-time,event,mode,x,y,z,battery,details
-15.460,Mission Start,AUTO.TAKEOFF,0.009,0.009,-0.035,1.000,
-50.212,Failure Start,POSCTL,-2.229,2.939,2.340,0.890,Fallback: Land
-57.460,Mission Complete,AUTO.LAND,-2.201,3.006,-0.187,0.500,
