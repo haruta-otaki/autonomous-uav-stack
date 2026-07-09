@@ -1,4 +1,0 @@
-time,event,mode,x,y,z,battery,details
-72.400,Mission Start,AUTO.TAKEOFF,0.007,0.002,-0.027,1.000,
-120.152,Failure Start,POSCTL,-9.478,9.759,3.892,0.890,Fallback: Smart RTL
-189.400,Mission Complete,AUTO.LAND,0.147,4.017,-0.089,0.500,

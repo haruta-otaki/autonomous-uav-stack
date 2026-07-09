@@ -8,5 +8,6 @@ catkin_ws/install/
 # VS Code
 .vscode/
 
-# rosbag files 
+# rosbag and log files 
 *.bag
+*.csv
