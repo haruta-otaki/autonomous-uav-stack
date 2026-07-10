@@ -109,4 +109,19 @@
     <!-- static transform from base_link to velodyne -->
     <node pkg="tf2_ros" type="static_transform_publisher" name="velodyne_tf" args="0 0 0.1227 0 0 0 base_link velodyne"/>
 
+    <!-- copied from octo_server's octomap_mapping.launch -->
+    <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
+		<param name="resolution" value="0.2" />
+		
+		<!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+		<param name="frame_id" type="string" value="map" />
+		
+		<!-- maximum range to integrate (speedup!) -->
+		<param name="sensor_model/max_range" value="5.0" />
+		
+		<!-- data source to integrate (PointCloud2) -->
+		<remap from="cloud_in" to="/velodyne_points" />
+	
+	</node>
+
 </launch>

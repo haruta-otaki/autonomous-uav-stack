@@ -14,3 +14,4 @@ catkin_ws/install/
 #cloned repositories 
 velodyne_simulator/
 octomap/
+octomap_mapping/
