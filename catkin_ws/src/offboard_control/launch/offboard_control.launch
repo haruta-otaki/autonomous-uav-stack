@@ -59,7 +59,7 @@
     <arg name="fallback_mode"/> 
     <!-- rosbag -->
     <!-- pkg: catkin package name, type: executable name, name: custom name of choice (for rosnode) -->
-    <node 
+    <!-- <node 
         pkg="rosbag"
         type="record"
         name="rosbag_record"
@@ -82,14 +82,14 @@
             /supervisor/completion
             /tf
             /tf_static
-            /rosout"/>
+            /rosout"/> -->
     <!-- pass parameters to metrics node -->
-    <node pkg="metrics" type="metrics_node" name="metrics_node" output="screen">
+    <!-- <node pkg="metrics" type="metrics_node" name="metrics_node" output="screen">
         <param name="trial_id" value="$(arg trial_id)"/>
         <param name="failure_mode" value="$(arg failure_mode)"/>
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
         <param name="metrics_path" value="$(find metrics)"/>
-    </node>
+    </node> -->
 
     <node pkg="supervisor" type="supervisor_node" name="supervisor_node" output="screen">
         <param name="fallback_mode" value="$(arg fallback_mode)"/>

@@ -452,6 +452,22 @@
         <use_parent_model_frame>1</use_parent_model_frame>
       </axis>
     </joint>
+    <!-- ROS Ground Truth Pose Broadcaster to Objects -->
+    <plugin name='p3d' filename='libgazebo_ros_p3d.so'>
+      <robotNamespace>/</robotNamespace>
+      <alwaysOn>true</alwaysOn>
+      <updateRate>50.0</updateRate>
+      <!-- publish base_link pose -->
+      <bodyName>base_link</bodyName>
+      <topicName>/ground_truth/pose</topicName>
+      <!-- ROS TF frame in which the pose is expressed (map or world) -->
+      <worldBodyName>world</worldBodyName>
+      <frameName>world</frameName>
+      <gaussianNoise>0.0</gaussianNoise>
+      <!-- TF transform for ground truth pose to input Octomap  -->
+      <publishTf>false</publishTf>
+    </plugin>
+
     <plugin name='rosbag' filename='libgazebo_multirotor_base_plugin.so'>
       <robotNamespace/>
       <linkName>base_link</linkName>
