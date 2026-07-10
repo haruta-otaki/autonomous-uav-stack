@@ -22,6 +22,8 @@
     <arg name="verbose" default="false"/>
     <arg name="paused" default="false"/>
     <arg name="respawn_gazebo" default="false"/>
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+
     <!-- MAVROS configs -->
     <arg name="fcu_url" default="udp://:14540@localhost:14557"/>
     <arg name="respawn_mavros" default="false"/>
@@ -52,6 +54,9 @@
         <arg name="fcu_url" value="$(arg fcu_url)"/>
         <arg name="respawn_mavros" value="$(arg respawn_mavros)"/>
     </include>
+
+    <!-- disable MAVROS TF publishing, use ground truth instead -->
+    <param name="mavros/local_position/tf/send" value="false"/>
 
     <!-- parameters -->
     <arg name="trial_id"/> 
@@ -101,9 +106,9 @@
     <node pkg="offboard_control" type="set_px4_params.py" name="set_px4_params" output="screen"/>
     <node pkg="offboard_control" type="offboard_control_node" name="offboard_control_node" output="screen"/>
     <node pkg="rtl" type="rtl_node" name="rtl_node" output="screen"/>
-    <arg name="rviz" default="true"/>
 
     <!--  rviz -->
+    <arg name="rviz" default="true"/>
     <node if="$(arg rviz)" pkg="rviz" type="rviz" name="$(anon rviz)" respawn="false" output="screen" args="-d $(find offboard_control)/velodyne.rviz" />
 
     <!-- static transform from base_link to velodyne -->
@@ -112,16 +117,16 @@
     <!-- copied from octo_server's octomap_mapping.launch -->
     <node pkg="octomap_server" type="octomap_server_node" name="octomap_server">
 		<param name="resolution" value="0.2" />
-		
 		<!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
 		<param name="frame_id" type="string" value="map" />
-		
 		<!-- maximum range to integrate (speedup!) -->
-		<param name="sensor_model/max_range" value="5.0" />
-		
-		<!-- data source to integrate (PointCloud2) -->
+		<param name="sensor_model/max_range" value="20.0" />
+		<!-- remap topic to integrate (PointCloud2) -->
 		<remap from="cloud_in" to="/velodyne_points" />
-	
+        <!-- ignore floor returns -->
+        <param name="occupancy_min_z" value="0.2" /> 
 	</node>
+    
+    <node pkg="mapping_control" type="mapping_control_node" name="mapping_control_node" output="screen"/>
 
 </launch>
