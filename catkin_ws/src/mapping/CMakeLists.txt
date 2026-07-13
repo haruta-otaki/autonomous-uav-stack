@@ -65,7 +65,7 @@ find_library(DYNAMICEDT3D_LIBRARY
 # Generate services in the 'srv' folder
 add_service_files(
   FILES
-  CheckClearance.srv
+  ScanClearance.srv
   # Service2.srv
 )
 
