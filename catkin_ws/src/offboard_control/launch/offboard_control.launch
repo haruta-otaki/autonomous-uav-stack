@@ -22,6 +22,7 @@
     <arg name="verbose" default="false"/>
     <arg name="paused" default="false"/>
     <arg name="respawn_gazebo" default="false"/>
+    <arg name="use_sim_time" default="true"/>
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
 
     <!-- MAVROS configs -->

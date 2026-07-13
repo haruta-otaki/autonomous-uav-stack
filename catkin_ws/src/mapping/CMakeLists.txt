@@ -14,11 +14,17 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
   tf2_ros
+  std_msgs
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
+find_package(octomap REQUIRED)
 
+find_library(DYNAMICEDT3D_LIBRARY
+  NAMES dynamicedt3d
+)
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -56,12 +62,12 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message2.msg
 # )
 
-## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+# Generate services in the 'srv' folder
+add_service_files(
+  FILES
+  CheckClearance.srv
+  # Service2.srv
+)
 
 ## Generate actions in the 'action' folder
 # add_action_files(
@@ -71,10 +77,11 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   geometry_msgs#   octomap_msgs#   sensor_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  # geometry_msgs#   octomap_msgs#   sensor_msgs
+  std_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -108,7 +115,8 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES mapping
-#  CATKIN_DEPENDS geometry_msgs octomap_msgs octomap_ros roscpp sensor_msgs tf2_ros
+ CATKIN_DEPENDS message_runtime
+#  geometry_msgs octomap_msgs octomap_ros roscpp sensor_msgs tf2_ros
 #  DEPENDS system_lib
 )
 
@@ -121,6 +129,7 @@ catkin_package(
 include_directories(
 # include
   ${catkin_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
@@ -136,7 +145,7 @@ include_directories(
 ## Declare a C++ executable
 ## With catkin_make all packages are built within a single CMake context
 ## The recommended prefix ensures that target names across packages don't collide
-# add_executable(${PROJECT_NAME}_node src/mapping_node.cpp)
+add_executable(${PROJECT_NAME}_node src/mapping_node.cpp)
 
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
@@ -149,9 +158,11 @@ include_directories(
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(${PROJECT_NAME}_node
+  ${catkin_LIBRARIES}
+  ${OCTOMAP_LIBRARIES}
+  ${DYNAMICEDT3D_LIBRARY}
+)
 
 #############
 ## Install ##
