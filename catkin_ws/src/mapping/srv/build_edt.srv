@@ -1,0 +1,9 @@
+# request
+# geometry_msgs/Point lower_bound
+# geometry_msgs/Point upper_bound
+# float32 max_dist      
+# bool unknown_as_occupied
+---
+# response
+
+bool result
