@@ -1,0 +1,9 @@
+geometry_msgs/PoseStamped start
+geometry_msgs/PoseStamped goal
+float32 minimum_clearance   
+bool allow_unknown       
+---
+# response
+bool success
+nav_msgs/Path path # sequence of waypoints
+float32 clearance
