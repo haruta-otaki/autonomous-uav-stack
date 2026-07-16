@@ -29,6 +29,12 @@ octomap::OcTree* tree;
 // global pointer 
 DynamicEDTOctomap* distmap = nullptr;
 
+supervisor::FailureMode current_failure_mode; 
+
+void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
+    current_failure_mode = *msg;
+}
+
 void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
     // msgToMap() returns AbstractOcTree* as the message could theoretically contain any tree type. 
     abstract = octomap_msgs::msgToMap(*msg);
@@ -124,55 +130,39 @@ struct Node {
 };
 
 class SparseHashGrid {
+public:
     float cellSize;
     // map using custom key and hash to store A* Nodes
     std::unordered_map<GridKey, Node, GridKeyHash> grid;
 
-    explicit SparseHashGrid(float size) : cellSize(size) {}
-
-    // Convert continuous world coordinates into discrete cell coordinates
-    GridKey worldToGrid(octomap::point3d p) const {
+    // convert continuous world coordinates into discrete cell coordinates
+    GridKey world_to_grid(octomap::point3d p) const {
         // brace initialization
         return {static_cast<int>(std::lround(p.x() / resolution)),
             static_cast<int>(std::lround(p.y() / resolution)),
             static_cast<int>(std::lround(p.z() / resolution))};
     }
 
-    // Insert an entity into the grid based on its position
-    void insert(float x, float y, const T& entity) {
-        CellKey key = worldToCell(x, y);
-        grid[key].push_back(entity);
-    }
-
-    // Clear all cells in the grid (useful for dynamic environments)
-    void clear() {
-        grid.clear();
-    }
-
-    // Query all entities inside a bounding box area
-    std::vector<T> queryRange(float minX, float minY, float maxX, float maxY) const {
-        std::vector<T> foundEntities;
-        
-        CellKey minCell = worldToCell(minX, minY);
-        CellKey maxCell = worldToCell(maxX, maxY);
-
-        // Loop through all overlapping cells in the range
-        for (int x = minCell.x; x <= maxCell.x; ++x) {
-            for (int y = minCell.y; y <= maxCell.y; ++y) {
-                auto it = grid.find({x, y});
-                if (it != grid.end()) {
-                    // Append all entities in this active cell to our results
-                    foundEntities.insert(foundEntities.end(), it->second.begin(), it->second.end());
-                }
-            }
+    // when to call world_to_grid
+    Node& get_or_insert(const GridKey& key, octomap::point3d p) {
+        // finds key, average case: O(1)
+        // returns an iterator, auto lets the compiler deduce the type
+        auto iterator = grid.find(key);
+        // iterator points at the end beyond the last key
+        if (iterator == grid.end()) {
+            Node node(p);
+            node.clearance = query_edt(p);
+            grid[key] = node; 
+            return grid[key];
+        } else {
+            // the second element in the iterator<GridKey, Node, GridKeyHash> is Node 
+            return iterator->second; 
         }
-        return foundEntities;
     }
 };
 
 double resolution = 0.4; 
 double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
-std::vector<Node> grid;
 
 ros::ServiceClient build_client;
 mapping::build_edt build_srv;
@@ -180,44 +170,22 @@ mapping::build_edt build_srv;
 ros::ServiceClient query_client;
 mapping::query_edt query_srv;
 
+SparseHashGrid grid; 
+
 
 bool plan_path(planner::plan_path::Request  &req,
         planner::plan_path::Response &res)
 {
-    if (build_client.call(build_srv)) {
-
+    if (!distmap) {
+       build_edt();
     }
-
     octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
     octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
-    Node source(start);
-    Node destination(goal);
-    for (double i = start.x(); i <= goal.x(); i+=resolution) {
-        for (double j = start.y(); j <= goal.y(); j+=resolution) {
-            for (double k = start.z(); k <= goal.z(); k+=resolution) {
-                geometry_msgs::Point pose;
-                pose.x = i; 
-                pose.y = j; 
-                pose.z = k; 
-                // assign values into request member
-                query_srv.request.pose = pose;
-                // calls service (blocks)
-                if (query_client.call(query_srv)) {
-                    Node node(octomap::point3d(i, j, k));
-                    node.clearance = query_srv.response.clearance; 
-                    if (i == start.x() && j == start.y() && k == start.z()){
-                        Node source = node; 
-                    }
-                    if (i == goal.x() && j == goal.y() && k == goal.z()){
-                        Node destination = node; 
-                    }
+    GridKey start_key = grid.world_to_grid(start);
+    GridKey goal_key = grid.world_to_grid(goal);
+    Node source = grid.get_or_insert(start_key, start);
+    Node destination = grid.get_or_insert(goal_key, goal);
 
-                    grid.push_back(node);
-                } 
-            }
-        }   
-    }
-    
     a_star(grid, source, destination);
     return true;
 }
@@ -246,7 +214,6 @@ int main(int argc, char** argv) {
     query_client = nh.serviceClient<mapping::query_edt>("query_edt");
     query_srv;
 
-    ros::spin();
     return (0);
 }
 
@@ -321,6 +288,19 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
     if (is_destination(source.point, destination.point)) {
         return;
     }
+
+    std::vector<T> foundEntities;
+    // Loop through all overlapping cells in the range
+    for (int x = minCell.x; x <= maxCell.x; ++x) {
+        for (int y = minCell.y; y <= maxCell.y; ++y) {
+            auto it = grid.find({x, y});
+            if (it != grid.end()) {
+                // Append all entities in this active cell to our results
+                foundEntities.insert(foundEntities.end(), it->second.begin(), it->second.end());
+            }
+        }
+    }
+
 
     // Create a closed list and initialise it to false which
     // means that no cell has been included yet This closed
