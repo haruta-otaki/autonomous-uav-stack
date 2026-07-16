@@ -4,6 +4,8 @@
 
 #include <iostream>
 #include <vector> 
+#include <unordered_map>
+#include <cmath>
 
 #include <mapping/build_edt.h>
 #include <mapping/query_edt.h>
@@ -22,23 +24,154 @@ using namespace std;
 // void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
 // }
 
+octomap::AbstractOcTree* abstract;
+octomap::OcTree* tree; 
+// global pointer 
+DynamicEDTOctomap* distmap = nullptr;
+
+void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
+    // msgToMap() returns AbstractOcTree* as the message could theoretically contain any tree type. 
+    abstract = octomap_msgs::msgToMap(*msg);
+    // get concrete OcTree type
+    tree = dynamic_cast<octomap::OcTree*>(abstract);
+}
+
+// takes in the request and response type defined in the srv file and returns 
+void build_edt()
+{
+    // get minimum and maximum coordinates from octree and create OctoMap point objects
+    double x,y,z;
+    tree->getMetricMin(x,y,z);
+    octomap::point3d min(x,y,z);
+    //std::cout<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
+    tree->getMetricMax(x,y,z);
+    octomap::point3d max(x,y,z);
+    //std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
+
+    // treat unknown voxels as free (aggressive approach)
+    bool unknownAsOccupied = false;
+    // indoor value
+    float maxDist = 2.0;    
+    if (distmap) {
+        delete distmap;
+    }
+    // compute an Euclidean Distance Transform (EDT) over an OctoMap to get maximize clearance from obstacles
+    // clamp distance computations and restrict the distance map to a subarea through the arguments
+    distmap = new DynamicEDTOctomap(maxDist, tree, min, max, unknownAsOccupied);    
+    // EDT algorithm: walks through the entire octree and computes, for every free voxel, its distance to nearest occupied voxel
+    // repeated calls incrementally updates the distances to reflect the modified occupancy map
+    distmap->update(); 
+}
+
+double query_edt(octomap::point3d p)
+{
+    if (!distmap) {
+        ROS_WARN("edt not built, call build_edt service");
+    }
+
+    distmap->update(); 
+
+    octomap::point3d closestObst;
+    float distance;
+    geometry_msgs::Point closest_obst_pose; 
+    // return the distance of the obstacle from the query point and its location
+    distmap->getDistanceAndClosestObstacle(p, distance, closestObst);
+    closest_obst_pose.x = closestObst.x();
+    closest_obst_pose.y = closestObst.y();
+    closest_obst_pose.z = closestObst.z();
+    
+    return distance;
+}
+
+// cell coordinate in sparse hash grid
+struct GridKey {
+    int x, y, z; 
+    // operator overloading, allowing GridKey comparisons
+    // const keyword is necessary for compilation, promising the operation will not modify the objects by making them immutable 
+    bool operator==(const GridKey& other) const {
+        return x == other.x && y == other.y && z == other.z;
+    }
+};
+
+struct GridKeyHash {
+    // custom hash function combining the cell coordinates
+    std::size_t operator()(const GridKey& k) const noexcept {
+        // formula from Boost's hash_combine to spread entropy well 
+        std::size_t h = std::hash<int>{}(k.x);
+        h ^= std::hash<int>{}(k.y) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(k.z) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h; 
+    }
+};
+
 struct Node {
     octomap::point3d point;
-    Node parent(); 
+    GridKey parent{}; 
+    double g = std::numeric_limits<double>::max(); 
+    double h = 0.0;
+    double clearance = -1.0; 
+    bool in_path = false; 
+    bool closed = false; 
 
     // constructor 
     Node(octomap::point3d p) {
-        // warn_timeout = warn_time;
+        point = p; 
     }
-    double f, g, h;
-    double clearance; 
 
     double get_f() {
         return g + h; 
     }
 };
 
+class SparseHashGrid {
+    float cellSize;
+    // map using custom key and hash to store A* Nodes
+    std::unordered_map<GridKey, Node, GridKeyHash> grid;
+
+    explicit SparseHashGrid(float size) : cellSize(size) {}
+
+    // Convert continuous world coordinates into discrete cell coordinates
+    GridKey worldToGrid(octomap::point3d p) const {
+        // brace initialization
+        return {static_cast<int>(std::lround(p.x() / resolution)),
+            static_cast<int>(std::lround(p.y() / resolution)),
+            static_cast<int>(std::lround(p.z() / resolution))};
+    }
+
+    // Insert an entity into the grid based on its position
+    void insert(float x, float y, const T& entity) {
+        CellKey key = worldToCell(x, y);
+        grid[key].push_back(entity);
+    }
+
+    // Clear all cells in the grid (useful for dynamic environments)
+    void clear() {
+        grid.clear();
+    }
+
+    // Query all entities inside a bounding box area
+    std::vector<T> queryRange(float minX, float minY, float maxX, float maxY) const {
+        std::vector<T> foundEntities;
+        
+        CellKey minCell = worldToCell(minX, minY);
+        CellKey maxCell = worldToCell(maxX, maxY);
+
+        // Loop through all overlapping cells in the range
+        for (int x = minCell.x; x <= maxCell.x; ++x) {
+            for (int y = minCell.y; y <= maxCell.y; ++y) {
+                auto it = grid.find({x, y});
+                if (it != grid.end()) {
+                    // Append all entities in this active cell to our results
+                    foundEntities.insert(foundEntities.end(), it->second.begin(), it->second.end());
+                }
+            }
+        }
+        return foundEntities;
+    }
+};
+
 double resolution = 0.4; 
+double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
 std::vector<Node> grid;
 
 ros::ServiceClient build_client;
@@ -103,6 +236,9 @@ int main(int argc, char** argv) {
     
     // service is created and advertised over ROS 
     ros::ServiceServer plan_service = nh.advertiseService("plan_path", plan_path);
+
+    ros::Subscriber octomap_sub = nh.subscribe<octomap_msgs::Octomap>
+        ("octomap_binary", 10, octomap_cb);
 
     build_client = nh.serviceClient<mapping::build_edt>("build_edt");
     build_srv;
@@ -176,18 +312,13 @@ void generate_path(std::vector<Node> grid, Node destination)
 // A* Search Algorithm
 void a_star(std::vector<Node> grid, Node source, Node destination)
 {
-    // Either the source or the destination is blocked
-    if (is_obstacle(grid, source.first, source.second) == false
-        || is_obstacle(grid, dest.first, dest.s, second)
-               == false) {
-        printf("Source or the destination is blocked\n");
+    // source or destination is an obstacle (collision gurantee)
+    if (is_obstacle(source.clearance, minimum_clearance) || is_obstacle(destination.clearance, minimum_clearance)) {
+        std::printf("source or destination is aligned with an obstacle \n");
         return;
     }
 
-    // If the destination cell is the same as source cell
-    if (is_destination(source.first, source.second, dest)
-        == true) {
-        printf("We are already at the destination\n");
+    if (is_destination(source.point, destination.point)) {
         return;
     }
 
