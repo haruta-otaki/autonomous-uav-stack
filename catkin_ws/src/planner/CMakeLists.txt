@@ -10,6 +10,7 @@ project(planner)
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   # mapping_control
+  std_msgs
   nav_msgs
   octomap_msgs
   octomap_ros
@@ -72,11 +73,13 @@ add_service_files(
 #   Action2.action
 # )
 
-## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   geometry_msgs#   nav_msgs#   octomap_msgs#   visualization_msgs
-# )
+# Generate added messages and services with any dependencies listed here
+generate_messages(
+  DEPENDENCIES
+  geometry_msgs
+  std_msgs
+  nav_msgs#   octomap_msgs#   visualization_msgs
+)
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##

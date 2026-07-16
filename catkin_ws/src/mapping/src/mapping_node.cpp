@@ -41,7 +41,6 @@ void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
     tree = dynamic_cast<octomap::OcTree*>(abstract);
 }
 
-
 // takes in the request and response type defined in the srv file and returns 
 bool build_edt(mapping::ScanClearance::Request  &req,
         mapping::ScanClearance::Response &res)
@@ -75,7 +74,7 @@ bool query_edt(mapping::ScanClearance::Request  &req,
         mapping::ScanClearance::Response &res)
 {
     if (!distmap) {
-        ROS_ERROR("distmap not built");
+        ROS_WARN("edt not built, call build_edt service");
         return false;
     }
 

@@ -3,18 +3,85 @@
 #include <nav_msgs/Odometry.h>
 
 #include <iostream>
+#include <vector> 
 
-#include <mapping/ScanClearance.h>
+#include <mapping/build_edt.h>
+#include <mapping/query_edt.h>
+#include <planner/plan_path.h>
+
+#include <octomap_msgs/Octomap.h>
+#include <octomap/AbstractOcTree.h>
+#include <octomap/OcTree.h>
+#include <octomap_msgs/conversions.h>
+
+#include <dynamicEDT3D/dynamicEDTOctomap.h>
+
 #include <bits/stdc++.h>
 using namespace std;
 
 // void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
 // }
 
-bool query_edt(mapping::ScanClearance::Request  &req,
-        mapping::ScanClearance::Response &res)
+double resolution = 0.4; 
+std::vector<Node> grid;
+
+ros::ServiceClient build_client;
+mapping::build_edt build_srv;
+
+ros::ServiceClient query_client;
+mapping::query_edt query_srv;
+
+
+struct Node {
+    octomap::point3d point;
+    Node parent(); 
+
+    // constructor 
+    Node(octomap::point3d p) {
+        // warn_timeout = warn_time;
+    }
+    double f, g, h;
+    double clearance; 
+
+    float get_f() {
+        return g + h; 
+    }
+
+    bool is_valid() {
+
+    }
+};
+
+
+bool plan_path(planner::plan_path::Request  &req,
+        planner::plan_path::Response &res)
 {
-   
+    if (build_client.call(build_srv)) {
+
+    }
+
+    octomap::point3d source(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
+    octomap::point3d destination(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
+
+    for (double i = source.x(); i < destination.x(); i+=resolution) {
+        for (double j = source.y(); j < destination.y(); j+=resolution) {
+            for (double k = source.z(); k < destination.z(); k+=resolution) {
+                geometry_msgs::Point pose;
+                pose.x = i; 
+                pose.y = j; 
+                pose.z = k; 
+                // assign values into request member
+                query_srv.request.pose = pose;
+                // calls service (blocks)
+                if (query_client.call(query_srv)) {
+                    Node node();
+                    grid.push_back(node);
+                } 
+            }
+        }   
+    }
+    
+    a_star(grid, source, destination);
     return true;
 }
 
@@ -31,82 +98,42 @@ int main(int argc, char** argv) {
     // tree.writeBinary("tree.bt");
     
     // service is created and advertised over ROS 
-    ros::ServiceServer query_service = nh.advertiseService("query_edt", query_edt);
+    ros::ServiceServer plan_service = nh.advertiseService("plan_path", plan_path);
+
+    build_client = nh.serviceClient<mapping::build_edt>("build_edt");
+    build_srv;
+
+    query_client = nh.serviceClient<mapping::query_edt>("query_edt");
+    query_srv;
 
     ros::spin();
-        /* Description of the Grid-
-     1--> The cell is not blocked
-     0--> The cell is blocked    */
-    int grid[9][10]
-        = { { 1, 0, 1, 1, 1, 1, 0, 1, 1, 1 },
-            { 1, 1, 1, 0, 1, 1, 1, 0, 1, 1 },
-            { 1, 1, 1, 0, 1, 1, 0, 1, 0, 1 },
-            { 0, 0, 1, 0, 1, 0, 0, 0, 0, 1 },
-            { 1, 1, 1, 0, 1, 1, 1, 0, 1, 0 },
-            { 1, 0, 1, 1, 1, 1, 0, 1, 0, 0 },
-            { 1, 0, 0, 0, 0, 1, 0, 0, 0, 1 },
-            { 1, 0, 1, 1, 1, 1, 0, 1, 1, 1 },
-            { 1, 1, 1, 0, 0, 0, 1, 0, 0, 1 } };
-
-    // Source is the left-most bottom-most corner
-    Pair src = make_pair(8, 0);
-
-    // Destination is the left-most top-most corner
-    Pair dest = make_pair(0, 0);
-
-    aStarSearch(grid, src, dest);
-
     return (0);
-    
 }
 
-#define ROW 9
-#define COL 10
-
-// Creating a shortcut for int, int pair type
-typedef pair<int, int> Pair;
-
-// Creating a shortcut for pair<int, pair<int, int>> type
-typedef pair<double, pair<int, int> > pPair;
-
-// A structure to hold the necessary parameters
-struct cell {
-    // Row and Column index of its parent
-    // Note that 0 <= i <= ROW-1 & 0 <= j <= COL-1
-    int parent_i, parent_j;
-    // f = g + h
-    double f, g, h;
-};
-
-// A Utility Function to check whether given cell (row, col)
-// is a valid cell or not.
-bool isValid(int row, int col)
+bool is_valid(octomap::point3d source, octomap::point3d destination, octomap::point3d current)
 {
-    // Returns true if row number and column number
-    // is in range
-    return (row >= 0) && (row < ROW) && (col >= 0)
-           && (col < COL);
+    float min_x = std::min(source.x(), destination.x());
+    float max_x = std::max(source.x(), destination.x());
+
+    float min_y = std::min(source.y(), destination.y());
+    float max_y = std::max(source.y(), destination.y());
+
+    float min_z = std::min(source.z(), destination.z());
+    float max_z = std::max(source.z(), destination.z());
+
+    return current.x() >= min_x && current.x() <= max_x &&
+           current.y() >= min_y && current.y() <= max_y &&
+           current.z() >= min_z && current.z() <= max_z;
 }
 
-// A Utility Function to check whether the given cell is
-// blocked or not
-bool isUnBlocked(int grid[][COL], int row, int col)
+bool is_obstacle(double clearance, double threshold)
 {
-    // Returns true if the cell is not blocked else false
-    if (grid[row][col] == 1)
-        return (true);
-    else
-        return (false);
+    return clearance <= threshold; 
 }
 
-// A Utility Function to check whether destination cell has
-// been reached or not
-bool isDestination(int row, int col, Pair dest)
+bool is_destination(octomap::point3d destination, octomap::point3d current)
 {
-    if (row == dest.first && col == dest.second)
-        return (true);
-    else
-        return (false);
+    return current == destination; 
 }
 
 // A Utility Function to calculate the 'h' heuristics.
@@ -118,10 +145,9 @@ double calculateHValue(int row, int col, Pair dest)
         + (col - dest.second) * (col - dest.second)));
 }
 
-// A Utility Function to trace the path from the source
-// to destination
-void tracePath(cell cellDetails[][COL], Pair dest)
+void generate_path(cell cellDetails[][COL], Pair dest)
 {
+    
     printf("\nThe Path is ");
     int row = dest.first;
     int col = dest.second;
@@ -150,30 +176,30 @@ void tracePath(cell cellDetails[][COL], Pair dest)
 // A Function to find the shortest path between
 // a given source cell to a destination cell according
 // to A* Search Algorithm
-void aStarSearch(int grid[][COL], Pair src, Pair dest)
+void a_star(int grid[][COL], Pair src, Pair dest)
 {
     // If the source is out of range
-    if (isValid(src.first, src.second) == false) {
+    if (is_valid(src.first, src.second) == false) {
         printf("Source is invalid\n");
         return;
     }
 
     // If the destination is out of range
-    if (isValid(dest.first, dest.second) == false) {
+    if (is_valid(dest.first, dest.second) == false) {
         printf("Destination is invalid\n");
         return;
     }
 
     // Either the source or the destination is blocked
-    if (isUnBlocked(grid, src.first, src.second) == false
-        || isUnBlocked(grid, dest.first, dest.second)
+    if (is_obstacle(grid, src.first, src.second) == false
+        || is_obstacle(grid, dest.first, dest.second)
                == false) {
         printf("Source or the destination is blocked\n");
         return;
     }
 
     // If the destination cell is the same as source cell
-    if (isDestination(src.first, src.second, dest)
+    if (is_destination(src.first, src.second, dest)
         == true) {
         printf("We are already at the destination\n");
         return;
@@ -265,15 +291,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //----------- 1st Successor (North) ------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i - 1, j) == true) {
+        if (is_valid(i - 1, j) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i - 1, j, dest) == true) {
+            if (is_destination(i - 1, j, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i - 1][j].parent_i = i;
                 cellDetails[i - 1][j].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -281,7 +307,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i - 1][j] == false
-                     && isUnBlocked(grid, i - 1, j)
+                     && is_obstacle(grid, i - 1, j)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.0;
                 hNew = calculateHValue(i - 1, j, dest);
@@ -313,15 +339,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //----------- 2nd Successor (South) ------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i + 1, j) == true) {
+        if (is_valid(i + 1, j) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i + 1, j, dest) == true) {
+            if (is_destination(i + 1, j, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i + 1][j].parent_i = i;
                 cellDetails[i + 1][j].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -329,7 +355,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i + 1][j] == false
-                     && isUnBlocked(grid, i + 1, j)
+                     && is_obstacle(grid, i + 1, j)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.0;
                 hNew = calculateHValue(i + 1, j, dest);
@@ -360,15 +386,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //----------- 3rd Successor (East) ------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i, j + 1) == true) {
+        if (is_valid(i, j + 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i, j + 1, dest) == true) {
+            if (is_destination(i, j + 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i][j + 1].parent_i = i;
                 cellDetails[i][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -377,7 +403,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i][j + 1] == false
-                     && isUnBlocked(grid, i, j + 1)
+                     && is_obstacle(grid, i, j + 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.0;
                 hNew = calculateHValue(i, j + 1, dest);
@@ -409,15 +435,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //----------- 4th Successor (West) ------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i, j - 1) == true) {
+        if (is_valid(i, j - 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i, j - 1, dest) == true) {
+            if (is_destination(i, j - 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i][j - 1].parent_i = i;
                 cellDetails[i][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -426,7 +452,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i][j - 1] == false
-                     && isUnBlocked(grid, i, j - 1)
+                     && is_obstacle(grid, i, j - 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.0;
                 hNew = calculateHValue(i, j - 1, dest);
@@ -459,15 +485,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i - 1, j + 1) == true) {
+        if (is_valid(i - 1, j + 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i - 1, j + 1, dest) == true) {
+            if (is_destination(i - 1, j + 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i - 1][j + 1].parent_i = i;
                 cellDetails[i - 1][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -476,7 +502,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i - 1][j + 1] == false
-                     && isUnBlocked(grid, i - 1, j + 1)
+                     && is_obstacle(grid, i - 1, j + 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.414;
                 hNew = calculateHValue(i - 1, j + 1, dest);
@@ -509,15 +535,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i - 1, j - 1) == true) {
+        if (is_valid(i - 1, j - 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i - 1, j - 1, dest) == true) {
+            if (is_destination(i - 1, j - 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i - 1][j - 1].parent_i = i;
                 cellDetails[i - 1][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -526,7 +552,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i - 1][j - 1] == false
-                     && isUnBlocked(grid, i - 1, j - 1)
+                     && is_obstacle(grid, i - 1, j - 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.414;
                 hNew = calculateHValue(i - 1, j - 1, dest);
@@ -558,15 +584,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i + 1, j + 1) == true) {
+        if (is_valid(i + 1, j + 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i + 1, j + 1, dest) == true) {
+            if (is_destination(i + 1, j + 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i + 1][j + 1].parent_i = i;
                 cellDetails[i + 1][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -575,7 +601,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i + 1][j + 1] == false
-                     && isUnBlocked(grid, i + 1, j + 1)
+                     && is_obstacle(grid, i + 1, j + 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.414;
                 hNew = calculateHValue(i + 1, j + 1, dest);
@@ -608,15 +634,15 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
         //------------
 
         // Only process this cell if this is a valid one
-        if (isValid(i + 1, j - 1) == true) {
+        if (is_valid(i + 1, j - 1) == true) {
             // If the destination cell is the same as the
             // current successor
-            if (isDestination(i + 1, j - 1, dest) == true) {
+            if (is_destination(i + 1, j - 1, dest) == true) {
                 // Set the Parent of the destination cell
                 cellDetails[i + 1][j - 1].parent_i = i;
                 cellDetails[i + 1][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
-                tracePath(cellDetails, dest);
+                generate_path(cellDetails, dest);
                 foundDest = true;
                 return;
             }
@@ -625,7 +651,7 @@ void aStarSearch(int grid[][COL], Pair src, Pair dest)
             // list or if it is blocked, then ignore it.
             // Else do the following
             else if (closedList[i + 1][j - 1] == false
-                     && isUnBlocked(grid, i + 1, j - 1)
+                     && is_obstacle(grid, i + 1, j - 1)
                             == true) {
                 gNew = cellDetails[i][j].g + 1.414;
                 hNew = calculateHValue(i + 1, j - 1, dest);
