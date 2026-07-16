@@ -28,12 +28,9 @@ octomap::AbstractOcTree* abstract;
 octomap::OcTree* tree; 
 // global pointer 
 DynamicEDTOctomap* distmap = nullptr;
+double resolution = 0.4; 
+double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
 
-supervisor::FailureMode current_failure_mode; 
-
-void mode_cb(const supervisor::FailureMode::ConstPtr& msg){
-    current_failure_mode = *msg;
-}
 
 void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
     // msgToMap() returns AbstractOcTree* as the message could theoretically contain any tree type. 
@@ -114,9 +111,9 @@ struct Node {
     octomap::point3d point;
     GridKey parent{}; 
     double g = std::numeric_limits<double>::max(); 
-    double h = 0.0;
-    double clearance = -1.0; 
-    bool in_path = false; 
+    double h = std::numeric_limits<double>::max(); 
+    double clearance = 0.0; 
+    bool has_parent = false; 
     bool closed = false; 
 
     // constructor 
@@ -161,16 +158,7 @@ public:
     }
 };
 
-double resolution = 0.4; 
-double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
-
-ros::ServiceClient build_client;
-mapping::build_edt build_srv;
-
-ros::ServiceClient query_client;
-mapping::query_edt query_srv;
-
-SparseHashGrid grid; 
+SparseHashGrid hash_grid; 
 
 
 bool plan_path(planner::plan_path::Request  &req,
@@ -181,12 +169,12 @@ bool plan_path(planner::plan_path::Request  &req,
     }
     octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
     octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
-    GridKey start_key = grid.world_to_grid(start);
-    GridKey goal_key = grid.world_to_grid(goal);
-    Node source = grid.get_or_insert(start_key, start);
-    Node destination = grid.get_or_insert(goal_key, goal);
+    GridKey start_key = hash_grid.world_to_grid(start);
+    GridKey goal_key = hash_grid.world_to_grid(goal);
+    Node source = hash_grid.get_or_insert(start_key, start);
+    Node destination = hash_grid.get_or_insert(goal_key, goal);
 
-    a_star(grid, source, destination);
+    a_star(source, destination);
     return true;
 }
 
@@ -207,12 +195,6 @@ int main(int argc, char** argv) {
 
     ros::Subscriber octomap_sub = nh.subscribe<octomap_msgs::Octomap>
         ("octomap_binary", 10, octomap_cb);
-
-    build_client = nh.serviceClient<mapping::build_edt>("build_edt");
-    build_srv;
-
-    query_client = nh.serviceClient<mapping::query_edt>("query_edt");
-    query_srv;
 
     return (0);
 }
@@ -253,31 +235,31 @@ double calculate_heuristic(octomap::point3d destination, octomap::point3d curren
     return ((double)sqrt(dx * dx + dy * dy + dz * dz));
 }
 
-void generate_path(std::vector<Node> grid, Node destination)
+std::vector<octomap::point3d> generate_path(const GridKey& destination_key)
 {
+    std::vector<octomap::point3d> path; 
+    GridKey key = destination_key; 
 
     std::printf("Path: \n");
-    std::stack<octomap::point3d> path;
-    Node current_node = destination; 
 
-    // the parent node of the source node is itself 
-    while (!(current_node.parent().point == current_node.point)) {
-        path.push(current_node.point);
-        current_node = current_node.parent();
+    // source does not have parent 
+    while (true) {
+        Node current_node = hash_grid.grid[key];
+        path.push_back(current_node.point);
+        if (!current_node.has_parent) {
+            break;
+        }
+        key = current_node.parent; 
     }
 
-    path.push(current_node.point);
-    while (!path.empty()) {
-        octomap::point3d p = path.top();
-        path.pop();
-        printf(" (%d,%d, %d) \n", p.x(), p.y(), p.z());
-    }
-
-    return;
+    std::reverse(path.begin(), path.end());
+    return path;
 }
+// create an alias for pair (tuple)
+typedef pair<double, Node> Pair;
 
 // A* Search Algorithm
-void a_star(std::vector<Node> grid, Node source, Node destination)
+void a_star(Node source, Node destination)
 {
     // source or destination is an obstacle (collision gurantee)
     if (is_obstacle(source.clearance, minimum_clearance) || is_obstacle(destination.clearance, minimum_clearance)) {
@@ -289,72 +271,29 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
         return;
     }
 
-    std::vector<T> foundEntities;
-    // Loop through all overlapping cells in the range
-    for (int x = minCell.x; x <= maxCell.x; ++x) {
-        for (int y = minCell.y; y <= maxCell.y; ++y) {
-            auto it = grid.find({x, y});
-            if (it != grid.end()) {
-                // Append all entities in this active cell to our results
-                foundEntities.insert(foundEntities.end(), it->second.begin(), it->second.end());
-            }
-        }
-    }
-
-
-    // Create a closed list and initialise it to false which
-    // means that no cell has been included yet This closed
-    // list is implemented as a boolean 2D array
+    // create a closed list, initialise it to false (no cell has been included) 
     bool closedList[ROW][COL];
     memset(closedList, false, sizeof(closedList));
 
-    // Declare a 2D array of structure to hold the details
-    // of that cell
+
     cell cellDetails[ROW][COL];
 
-    int i, j;
+    // initialize source 
+    source.g = 0.0;
+    source.h = 0.0;
 
-    for (i = 0; i < ROW; i++) {
-        for (j = 0; j < COL; j++) {
-            cellDetails[i][j].f = FLT_MAX;
-            cellDetails[i][j].g = FLT_MAX;
-            cellDetails[i][j].h = FLT_MAX;
-            cellDetails[i][j].parent_i = -1;
-            cellDetails[i][j].parent_j = -1;
-        }
-    }
+    
+    //  create open list (set) with <f, <i, j>>
+    set<Pair> open_list;
+    open_list.insert(make_pair(source.get_f(), source));
 
-    // Initialising the parameters of the starting node
-    i = source.first, j = source.second;
-    cellDetails[i][j].f = 0.0;
-    cellDetails[i][j].g = 0.0;
-    cellDetails[i][j].h = 0.0;
-    cellDetails[i][j].parent_i = i;
-    cellDetails[i][j].parent_j = j;
+    bool found_destination = false;
 
-    /*
-     Create an open list having information as-
-     <f, <i, j>>
-     where f = g + h,
-     and i, j are the row and column index of that cell
-     Note that 0 <= i <= ROW-1 & 0 <= j <= COL-1
-     This open list is implemented as a set of pair of
-     pair.*/
-    set<pPair> openList;
-
-    // Put the starting cell on the open list and set its
-    // 'f' as 0
-    openList.insert(make_pair(0.0, make_pair(i, j)));
-
-    // We set this boolean value as false as initially
-    // the destination is not reached.
-    bool foundDest = false;
-
-    while (!openList.empty()) {
-        pPair p = *openList.begin();
+    while (!open_list.empty()) {
+        Pair p = *open_list.begin();
 
         // Remove this vertex from the open list
-        openList.erase(openList.begin());
+        open_list.erase(open_list.begin());
 
         // Add this vertex to the closed list
         i = p.second.first;
@@ -397,7 +336,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i - 1][j].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
             // If the successor is already on the closed
@@ -420,7 +359,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i - 1][j].f == FLT_MAX
                     || cellDetails[i - 1][j].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i - 1, j)));
 
                     // Update the details of this cell
@@ -445,7 +384,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i + 1][j].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
             // If the successor is already on the closed
@@ -468,7 +407,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i + 1][j].f == FLT_MAX
                     || cellDetails[i + 1][j].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i + 1, j)));
                     // Update the details of this cell
                     cellDetails[i + 1][j].f = fNew;
@@ -492,7 +431,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -516,7 +455,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i][j + 1].f == FLT_MAX
                     || cellDetails[i][j + 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i, j + 1)));
 
                     // Update the details of this cell
@@ -541,7 +480,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -565,7 +504,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i][j - 1].f == FLT_MAX
                     || cellDetails[i][j - 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i, j - 1)));
 
                     // Update the details of this cell
@@ -591,7 +530,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i - 1][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -615,7 +554,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i - 1][j + 1].f == FLT_MAX
                     || cellDetails[i - 1][j + 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i - 1, j + 1)));
 
                     // Update the details of this cell
@@ -641,7 +580,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i - 1][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -665,7 +604,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i - 1][j - 1].f == FLT_MAX
                     || cellDetails[i - 1][j - 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i - 1, j - 1)));
                     // Update the details of this cell
                     cellDetails[i - 1][j - 1].f = fNew;
@@ -690,7 +629,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i + 1][j + 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -714,7 +653,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i + 1][j + 1].f == FLT_MAX
                     || cellDetails[i + 1][j + 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i + 1, j + 1)));
 
                     // Update the details of this cell
@@ -740,7 +679,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 cellDetails[i + 1][j - 1].parent_j = j;
                 printf("The destination cell is found\n");
                 generate_path(cellDetails, dest);
-                foundDest = true;
+                found_destination = true;
                 return;
             }
 
@@ -764,7 +703,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
                 // better, using 'f' cost as the measure.
                 if (cellDetails[i + 1][j - 1].f == FLT_MAX
                     || cellDetails[i + 1][j - 1].f > fNew) {
-                    openList.insert(make_pair(
+                    open_list.insert(make_pair(
                         fNew, make_pair(i + 1, j - 1)));
 
                     // Update the details of this cell
@@ -783,7 +722,7 @@ void a_star(std::vector<Node> grid, Node source, Node destination)
     // reach the destination cell. This may happen when the
     // there is no way to destination cell (due to
     // blockages)
-    if (foundDest == false)
+    if (found_destination == false)
         printf("Failed to find the Destination Cell\n");
 
     return;
