@@ -22,16 +22,6 @@ using namespace std;
 // void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
 // }
 
-double resolution = 0.4; 
-std::vector<Node> grid;
-
-ros::ServiceClient build_client;
-mapping::build_edt build_srv;
-
-ros::ServiceClient query_client;
-mapping::query_edt query_srv;
-
-
 struct Node {
     octomap::point3d point;
     Node parent(); 
@@ -43,14 +33,19 @@ struct Node {
     double f, g, h;
     double clearance; 
 
-    float get_f() {
+    double get_f() {
         return g + h; 
     }
-
-    bool is_valid() {
-
-    }
 };
+
+double resolution = 0.4; 
+std::vector<Node> grid;
+
+ros::ServiceClient build_client;
+mapping::build_edt build_srv;
+
+ros::ServiceClient query_client;
+mapping::query_edt query_srv;
 
 
 bool plan_path(planner::plan_path::Request  &req,
@@ -60,12 +55,13 @@ bool plan_path(planner::plan_path::Request  &req,
 
     }
 
-    octomap::point3d source(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
-    octomap::point3d destination(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
-
-    for (double i = source.x(); i < destination.x(); i+=resolution) {
-        for (double j = source.y(); j < destination.y(); j+=resolution) {
-            for (double k = source.z(); k < destination.z(); k+=resolution) {
+    octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
+    octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
+    Node source(start);
+    Node destination(goal);
+    for (double i = start.x(); i <= goal.x(); i+=resolution) {
+        for (double j = start.y(); j <= goal.y(); j+=resolution) {
+            for (double k = start.z(); k <= goal.z(); k+=resolution) {
                 geometry_msgs::Point pose;
                 pose.x = i; 
                 pose.y = j; 
@@ -74,7 +70,15 @@ bool plan_path(planner::plan_path::Request  &req,
                 query_srv.request.pose = pose;
                 // calls service (blocks)
                 if (query_client.call(query_srv)) {
-                    Node node();
+                    Node node(octomap::point3d(i, j, k));
+                    node.clearance = query_srv.response.clearance; 
+                    if (i == start.x() && j == start.y() && k == start.z()){
+                        Node source = node; 
+                    }
+                    if (i == goal.x() && j == goal.y() && k == goal.z()){
+                        Node destination = node; 
+                    }
+
                     grid.push_back(node);
                 } 
             }
@@ -112,14 +116,14 @@ int main(int argc, char** argv) {
 
 bool is_valid(octomap::point3d source, octomap::point3d destination, octomap::point3d current)
 {
-    float min_x = std::min(source.x(), destination.x());
-    float max_x = std::max(source.x(), destination.x());
+    double min_x = std::min(source.x(), destination.x());
+    double max_x = std::max(source.x(), destination.x());
 
-    float min_y = std::min(source.y(), destination.y());
-    float max_y = std::max(source.y(), destination.y());
+    double min_y = std::min(source.y(), destination.y());
+    double max_y = std::max(source.y(), destination.y());
 
-    float min_z = std::min(source.z(), destination.z());
-    float max_z = std::max(source.z(), destination.z());
+    double min_z = std::min(source.z(), destination.z());
+    double max_z = std::max(source.z(), destination.z());
 
     return current.x() >= min_x && current.x() <= max_x &&
            current.y() >= min_y && current.y() <= max_y &&
@@ -136,70 +140,52 @@ bool is_destination(octomap::point3d destination, octomap::point3d current)
     return current == destination; 
 }
 
-// A Utility Function to calculate the 'h' heuristics.
-double calculateHValue(int row, int col, Pair dest)
+// calculate 3D Euclidean distance
+double calculate_heuristic(octomap::point3d destination, octomap::point3d current)
 {
-    // Return using the distance formula
-    return ((double)sqrt(
-        (row - dest.first) * (row - dest.first)
-        + (col - dest.second) * (col - dest.second)));
+    double dx = current.x()-destination.x();
+    double dy = current.y()-destination.y();
+    double dz = current.z()-destination.z();
+
+    return ((double)sqrt(dx * dx + dy * dy + dz * dz));
 }
 
-void generate_path(cell cellDetails[][COL], Pair dest)
+void generate_path(std::vector<Node> grid, Node destination)
 {
-    
-    printf("\nThe Path is ");
-    int row = dest.first;
-    int col = dest.second;
 
-    stack<Pair> Path;
+    std::printf("Path: \n");
+    std::stack<octomap::point3d> path;
+    Node current_node = destination; 
 
-    while (!(cellDetails[row][col].parent_i == row
-             && cellDetails[row][col].parent_j == col)) {
-        Path.push(make_pair(row, col));
-        int temp_row = cellDetails[row][col].parent_i;
-        int temp_col = cellDetails[row][col].parent_j;
-        row = temp_row;
-        col = temp_col;
+    // the parent node of the source node is itself 
+    while (!(current_node.parent().point == current_node.point)) {
+        path.push(current_node.point);
+        current_node = current_node.parent();
     }
 
-    Path.push(make_pair(row, col));
-    while (!Path.empty()) {
-        pair<int, int> p = Path.top();
-        Path.pop();
-        printf("-> (%d,%d) ", p.first, p.second);
+    path.push(current_node.point);
+    while (!path.empty()) {
+        octomap::point3d p = path.top();
+        path.pop();
+        printf(" (%d,%d, %d) \n", p.x(), p.y(), p.z());
     }
 
     return;
 }
 
-// A Function to find the shortest path between
-// a given source cell to a destination cell according
-// to A* Search Algorithm
-void a_star(int grid[][COL], Pair src, Pair dest)
+// A* Search Algorithm
+void a_star(std::vector<Node> grid, Node source, Node destination)
 {
-    // If the source is out of range
-    if (is_valid(src.first, src.second) == false) {
-        printf("Source is invalid\n");
-        return;
-    }
-
-    // If the destination is out of range
-    if (is_valid(dest.first, dest.second) == false) {
-        printf("Destination is invalid\n");
-        return;
-    }
-
     // Either the source or the destination is blocked
-    if (is_obstacle(grid, src.first, src.second) == false
-        || is_obstacle(grid, dest.first, dest.second)
+    if (is_obstacle(grid, source.first, source.second) == false
+        || is_obstacle(grid, dest.first, dest.s, second)
                == false) {
         printf("Source or the destination is blocked\n");
         return;
     }
 
     // If the destination cell is the same as source cell
-    if (is_destination(src.first, src.second, dest)
+    if (is_destination(source.first, source.second, dest)
         == true) {
         printf("We are already at the destination\n");
         return;
@@ -228,7 +214,7 @@ void a_star(int grid[][COL], Pair src, Pair dest)
     }
 
     // Initialising the parameters of the starting node
-    i = src.first, j = src.second;
+    i = source.first, j = source.second;
     cellDetails[i][j].f = 0.0;
     cellDetails[i][j].g = 0.0;
     cellDetails[i][j].h = 0.0;
