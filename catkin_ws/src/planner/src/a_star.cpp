@@ -14,6 +14,8 @@
 #include <octomap/OcTree.h>
 #include <octomap_msgs/conversions.h>
 
+#include <nav_msgs/Path.h>
+
 #include <dynamicEDT3D/dynamicEDTOctomap.h>
 
 // cell coordinate in sparse hash grid
@@ -45,6 +47,7 @@ struct Node {
     double clearance = 0.0; 
     bool has_parent = false; 
     bool closed = false; 
+    bool exist = false; 
 
     // constructor 
     Node(octomap::point3d p) {
@@ -77,7 +80,9 @@ public:
         // iterator points at the end beyond the last key
         if (iterator == grid.end()) {
             Node node(p);
-            node.clearance = query_edt(p);
+            double clearance;
+            node.exist = query_edt(p, clearance);
+            node.clearance = clearance;
             grid[key] = node; 
             return grid[key];
         } else {
@@ -92,6 +97,7 @@ SparseHashGrid hash_grid;
 octomap::AbstractOcTree* abstract;
 octomap::OcTree* tree;  
 DynamicEDTOctomap* distmap = nullptr;
+ros::Publisher path_pub; 
 // create an alias for pair (tuple)
 typedef std::pair<double, GridKey> Pair;
 double resolution = 0.4; 
@@ -135,10 +141,16 @@ void build_edt()
     distmap->update(); 
 }
 
-double query_edt(octomap::point3d p)
+bool query_edt(octomap::point3d p, double& clearance)
 {
-    if (!distmap) {
+    if (!tree || !distmap) {
         ROS_WARN("edt not built, call build_edt service");
+        return false;
+    }
+
+    if (tree->search(p) == nullptr) {
+        ROS_WARN("queried point never observed by sensor");
+        return false; 
     }
 
     octomap::point3d closestObst;
@@ -150,7 +162,8 @@ double query_edt(octomap::point3d p)
     closest_obst_pose.y = closestObst.y();
     closest_obst_pose.z = closestObst.z();
     
-    return distance;
+    clearance = distance;
+    return true; 
 }
 
 bool plan_path(planner::plan_path::Request  &req,
@@ -167,7 +180,13 @@ bool plan_path(planner::plan_path::Request  &req,
     Node destination = hash_grid.get_or_insert(goal_key, goal);
 
     a_star(start_key, goal_key);
+    // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
+    tree->writeBinary("/tmp/tree.bt");
     return true;
+}
+
+bool is_valid(Node node) {
+    return !node.exist; 
 }
 
 bool is_obstacle(double clearance, double threshold)
@@ -208,6 +227,28 @@ std::vector<octomap::point3d> generate_path(const GridKey& destination_key)
     }
 
     std::reverse(path.begin(), path.end());
+
+    // instantiate Path message
+    nav_msgs::Path path_msg;
+
+    // populate main header
+    path_msg.header.stamp = ros::Time::now();
+    path_msg.header.frame_id = "map";
+
+    // create geomerty_msgs waypoints into the path's poses vector
+    for (auto& p : path) {
+        geometry_msgs::PoseStamped pose;
+        pose.header = path_msg.header;
+
+        pose.pose.position.x = p.x();
+        pose.pose.position.y = p.y();
+        pose.pose.position.z = p.z();
+        pose.pose.orientation.w = 1.0;
+
+        path_msg.poses.push_back(pose);
+    }
+
+    path_pub.publish(path_msg);
     return path;
 }
 
@@ -270,8 +311,8 @@ void a_star(GridKey source_key, GridKey destination_key)
                             return;
                         }
 
-                        // skip if neighbor is already visited or an obstacle
-                        if (neighbor.closed || is_obstacle(neighbor.clearance, minimum_clearance)) {
+                        // skip if neighbor is out of bounds, already visited, or an obstacle
+                        if (is_valid(neighbor) || neighbor.closed || is_obstacle(neighbor.clearance, minimum_clearance)) {
                             continue; 
                         }
                         // new g, h, f values
@@ -317,6 +358,7 @@ int main(int argc, char** argv) {
     // service is created and advertised over ROS 
     ros::ServiceServer plan_service = nh.advertiseService("plan_path", plan_path);
 
+    path_pub = nh.advertise<nav_msgs::Path>("path", 1, true);
 
     ros::spin();
     return (0);
