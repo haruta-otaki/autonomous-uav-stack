@@ -7,6 +7,7 @@
 #include <mavros_msgs/State.h>
 
 #include <supervisor/FailureMode.h>
+#include <planner/plan_path.h>
 
 #include <std_msgs/Bool.h>
 
@@ -151,6 +152,9 @@ int main(int argc, char **argv) {
     ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
         ("supervisor/intermediate_offboard_pose", 10);   
 
+    ros::ServiceClient planner_client = nh.serviceClient<planner::plan_path>("plan_path");
+    planner::plan_path planner_srv;
+
     // setpoint publishing rate must be faster than 2 Hz 
     // PX4 has a timeout of 500 ms between two offboard commands, and fall backs to the last mode if timeout is exceeded 
     // recommended to enter offboard mode from position mode
@@ -180,6 +184,11 @@ int main(int argc, char **argv) {
             if (!new_failure) {
                 current_mode = Mode::Offboard;
                 new_failure = true; 
+                // planner_srv.request.a = atoll(argv[1]);
+                // planner_srv.request.b = atoll(argv[2]);
+                if (planner_client.call(planner_srv))
+                {
+                }
             }
             switch (current_mode) {
                 case Mode::Offboard:

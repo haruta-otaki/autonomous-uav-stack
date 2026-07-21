@@ -171,6 +171,8 @@ bool plan_path(planner::plan_path::Request  &req,
 {
     if (!distmap) {
        build_edt();
+        // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
+        tree->writeBinary("/tmp/tree.bt");
     }
     octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
     octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
@@ -180,8 +182,6 @@ bool plan_path(planner::plan_path::Request  &req,
     Node destination = hash_grid.get_or_insert(goal_key, goal);
 
     a_star(start_key, goal_key);
-    // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
-    tree->writeBinary("/tmp/tree.bt");
     return true;
 }
 
@@ -209,7 +209,7 @@ double calculate_heuristic(octomap::point3d current, octomap::point3d destinatio
     return ((double)sqrt(dx * dx + dy * dy + dz * dz));
 }
 
-std::vector<octomap::point3d> generate_path(const GridKey& destination_key)
+void generate_path(const GridKey& destination_key)
 {
     std::vector<octomap::point3d> path; 
     GridKey key = destination_key; 
@@ -249,7 +249,6 @@ std::vector<octomap::point3d> generate_path(const GridKey& destination_key)
     }
 
     path_pub.publish(path_msg);
-    return path;
 }
 
 // A* Search Algorithm
@@ -359,6 +358,8 @@ int main(int argc, char** argv) {
     ros::ServiceServer plan_service = nh.advertiseService("plan_path", plan_path);
 
     path_pub = nh.advertise<nav_msgs::Path>("path", 1, true);
+    // service is created and advertised over ROS 
+    // ros::ServiceServer build_service = nh.advertiseService("build_edt", build_edt);
 
     ros::spin();
     return (0);

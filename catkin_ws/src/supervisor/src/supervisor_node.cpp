@@ -79,22 +79,6 @@ struct Watchdog {
     }
 };
 
-struct MachineState {
-    //fields 
-    geometry_msgs::PoseStamped pose; 
-    Mode mode; 
-
-    // constructor 
-    MachineState(double x, double y, double z, Mode m) {
-        pose.pose.position.x = x; 
-        pose.pose.position.y = y; 
-        pose.pose.position.z = z; 
-        pose.pose.orientation.w = 1.0; 
-
-        mode = m; 
-    }
-};
-
 supervisor::FailureMode failure_mode_msg; 
 mavros_msgs::State current_state; 
 geometry_msgs::PoseStamped current_pose; 
@@ -103,6 +87,15 @@ sensor_msgs::BatteryState current_battery;
 bool received_rc = false; 
 Watchdog rc_watchdog(0.4, 0.8);
 bool fallback_done = false;
+
+geometry_msgs::PoseStamped create_pose(double x, double y, double z) {
+    geometry_msgs::PoseStamped pose; 
+    pose.pose.position.x = x; 
+    pose.pose.position.y = y; 
+    pose.pose.position.z = z; 
+    pose.pose.orientation.w = 1.0; 
+    return pose; 
+}
 
 void fallback_cb(const std_msgs::Bool::ConstPtr& msg)
 {
@@ -204,25 +197,38 @@ int main(int argc, char **argv) {
     std::string fallback_mode; 
     nh_private.param("fallback_mode", fallback_mode, std::string(""));
 
-    // start and end of mission 
-    std::vector<MachineState> states = {
-        MachineState(0.0, 0.0, 2.0, Mode::Init), MachineState(-15.0, 15.0, 2.0, Mode::Land)
-    };
+    double source_x;
+    double source_y;
+    double source_z;
 
-    int mode_index = 0; 
+    double destination_x;
+    double destination_y;
+    double destination_z;
+
+    nh.param("source/x", source_x, 7.5);
+    nh.param("source/y", source_y, -8.5);
+    nh.param("source/z", source_z, 2.0);
+
+    nh.param("destination/x", destination_x, -15.0);
+    nh.param("destination/y", destination_y, 15.0);
+    nh.param("destination/z", destination_z, 2.0);
+
+    geometry_msgs::PoseStamped source = create_pose(source_x, source_y, source_z);
+    geometry_msgs::PoseStamped destination = create_pose(destination_x, destination_y, destination_z);
+
     bool recovery_eligible; 
     ros::Time last_request = ros::Time::now();
     
     ROS_INFO("[SUPERVISOR] initializing...");
     Mode current_mode = Mode::Init;
-    command_pose = states[mode_index].pose;
+    command_pose = current_pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
         switch (current_mode) {
             case Mode::Init: 
 
-                // wait for connection to be established between mavros and the autopilot 
+                // wait for connectisourceon to be established between mavros and the autopilot 
                 // loop exits when heartbeat message (small mavlink message that tells whether the system is alive) is received
                 while(ros::ok() && !current_state.connected) {
                     // lets ros process callbacks once to update current_state
@@ -233,12 +239,11 @@ int main(int argc, char **argv) {
                 // setpoints must be already streamed before entering offboard mode (PX4 rejects it otherwise)
                 // 100 messages across 5 seconds before requesting offboard 
                 for (int i = 100; ros::ok() && i > 0; --i) {
-                    local_pos_pub.publish(states[mode_index].pose);
+                    local_pos_pub.publish(current_pose);
                     ros::spinOnce();
                     rate.sleep();
                 }
 
-                mode_index += 1; 
                 current_mode = Mode::Prestream;
                 failure_mode_msg.mode = supervisor::FailureMode::PRESTREAM; 
                 break;
@@ -391,7 +396,6 @@ int main(int argc, char **argv) {
                 last_request = ros::Time::now();
             } 
             current_mode = Mode::Prestream;
-            mode_index = 1; 
             ROS_INFO_THROTTLE(4.0, "[SUPERVISOR] prestreaming...");
         }
         mode_pub.publish(failure_mode_msg);

@@ -34,7 +34,6 @@ void ground_truth_pose_cb(const nav_msgs::Odometry::ConstPtr &msg){
     br.sendTransform(transformStamped);
 }
 
-
 int main(int argc, char** argv) {
     ros::init(argc, argv, "mapping_node");
 
@@ -42,6 +41,8 @@ int main(int argc, char** argv) {
 
     ros::Subscriber ground_truth_pose_sub = nh.subscribe<nav_msgs::Odometry>
         ("ground_truth/pose", 10, ground_truth_pose_cb);
+    // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
+    // tree.writeBinary("tree.bt");
 
     ros::spin();
 }

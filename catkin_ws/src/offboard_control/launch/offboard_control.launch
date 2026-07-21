@@ -23,7 +23,7 @@
     <arg name="paused" default="false"/>
     <arg name="respawn_gazebo" default="false"/>
     <arg name="use_sim_time" default="true"/>
-    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+    <param name="/use_sim_time" value="$(arg use_sim_time)"/>
 
     <!-- MAVROS configs -->
     <arg name="fcu_url" default="udp://:14540@localhost:14557"/>
@@ -60,9 +60,12 @@
     <param name="mavros/local_position/tf/send" value="false"/>
 
     <!-- parameters -->
-    <arg name="trial_id"/> 
-    <arg name="failure_mode"/> 
-    <arg name="fallback_mode"/> 
+    <arg name="trial_id" default="0"/> 
+    <arg name="failure_mode" default="long"/> 
+    <arg name="fallback_mode" default="continue"/> 
+    <arg name="source" default="{x: 7.5, y: -8.5, z: 2.0}"/>
+    <arg name="destination"  default="{x: -15.0, y: 15.0, z: 2.0}"/>
+
     <!-- rosbag -->
     <!-- pkg: catkin package name, type: executable name, name: custom name of choice (for rosnode) -->
     <!-- <node 
@@ -77,7 +80,7 @@
             /mavros/global_position/global
             /mavros/global_position/rel_alt
             /mavros/imu/data
-            /mavros/setpoint_position/local
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>        /mavros/setpoint_position/local
             /mavros/setpoint_raw/local
             /mavros/rc/in
             /mavros/manual_control/control
@@ -99,6 +102,9 @@
 
     <node pkg="supervisor" type="supervisor_node" name="supervisor_node" output="screen">
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
+        <param name="source" value="$(arg source)" />
+        <param name="destination" value="$(arg destination)" />
+
     </node>
 
     <!-- set COM_RC_LOSS_T and COM_DL_LOSS_T values to isolate supervisor behavior from PX4 firmware failsafes -->
