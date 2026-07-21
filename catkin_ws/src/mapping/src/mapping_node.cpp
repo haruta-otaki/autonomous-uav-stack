@@ -1,20 +1,7 @@
 #include <ros/ros.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <nav_msgs/Odometry.h>
-
-#include <octomap_msgs/Octomap.h>
-#include <octomap/AbstractOcTree.h>
-#include <octomap/OcTree.h>
-#include <octomap_msgs/conversions.h>
-
-#include <dynamicEDT3D/dynamicEDTOctomap.h>
 #include <iostream>
-
-
-octomap::AbstractOcTree* abstract;
-octomap::OcTree* tree; 
-// global pointer 
-DynamicEDTOctomap* distmap = nullptr;
 
 // publish ground_truth/pose as a TF transform 
 void ground_truth_pose_cb(const nav_msgs::Odometry::ConstPtr &msg){
@@ -39,8 +26,6 @@ int main(int argc, char** argv) {
 
     ros::Subscriber ground_truth_pose_sub = nh.subscribe<nav_msgs::Odometry>
         ("ground_truth/pose", 10, ground_truth_pose_cb);
-    // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
-    // tree.writeBinary("tree.bt");
 
     ros::spin();
 }

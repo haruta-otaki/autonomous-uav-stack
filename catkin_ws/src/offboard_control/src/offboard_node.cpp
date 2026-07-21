@@ -15,16 +15,6 @@
 #include <vector>
 #include <limits>
 
-// FSM: INIT WAIT PRESET OFFBOARD ARM WAYPOINT_1 ~ 3 LAND HALT 
-enum class Mode {
-    Offboard, 
-    // Simplify to Waypoint, to make custom messages 
-    Waypoint_0,
-    Waypoint_1,
-    Waypoint_2,
-    Waypoint_3,
-};
-
 // global variables
 bool received_pose = false; 
 

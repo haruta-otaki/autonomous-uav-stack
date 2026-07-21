@@ -6,6 +6,7 @@
 #include <vector> 
 #include <unordered_map>
 #include <cmath>
+#include <tuple>
 
 // header file generated from the srv file 
 #include <planner/plan_path.h>
@@ -26,6 +27,11 @@ struct GridKey {
     // const keyword is necessary for compilation, promising the operation will not modify the objects by making them immutable 
     bool operator==(const GridKey& other) const {
         return x == other.x && y == other.y && z == other.z;
+    }
+
+    // operator< is used only for set<Pair> to order by (f, GridKey)(it has no spatial meaning)
+    bool operator<(const GridKey& other) const {
+        return std::tie(x, y, z) < std::tie(other.x, other.y, other.z);
     }
 };
 
@@ -60,9 +66,72 @@ struct Node {
     }
 };
 
+octomap::AbstractOcTree* abstract;
+octomap::OcTree* tree;  
+DynamicEDTOctomap* distmap = nullptr;
+ros::Publisher path_pub; 
+double resolution = 0.4; 
+double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
+
+
+// takes in the request and response type defined in the srv file and returns 
+void build_edt()
+{
+    if (!tree) {
+        ROS_WARN("[PLANNER] octomap message has not arrived yet");
+        return;
+    }
+    // get minimum and maximum coordinates from octree and create OctoMap point objects
+    double x,y,z;
+    tree->getMetricMin(x,y,z);
+    octomap::point3d min(x,y,z);
+    //std::cout<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
+    tree->getMetricMax(x,y,z);
+    octomap::point3d max(x,y,z);
+    //std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
+
+    // treat unknown voxels as free (aggressive approach)
+    bool unknownAsOccupied = false;
+    // indoor value
+    float maxDist = 2.0;    
+    if (distmap) {
+        delete distmap;
+    }
+    // compute an Euclidean Distance Transform (EDT) over an OctoMap to get maximize clearance from obstacles
+    // clamp distance computations and restrict the distance map to a subarea through the arguments
+    distmap = new DynamicEDTOctomap(maxDist, tree, min, max, unknownAsOccupied);    
+    // EDT algorithm: walks through the entire octree and computes, for every free voxel, its distance to nearest occupied voxel
+    // repeated calls incrementally updates the distances to reflect the modified occupancy map
+    distmap->update(); 
+}
+
+bool query_edt(octomap::point3d p, double& clearance)
+{
+    if (!tree || !distmap) {
+        ROS_WARN("[PLANNER] edt not built, call build_edt service");
+        return false;
+    }
+
+    if (tree->search(p) == nullptr) {
+        ROS_WARN("[PLANNER] queried point never observed by sensor");
+        return false; 
+    }
+
+    octomap::point3d closestObst;
+    float distance;
+    geometry_msgs::Point closest_obst_pose; 
+    // return the distance of the obstacle from the query point and its location
+    distmap->getDistanceAndClosestObstacle(p, distance, closestObst);
+    closest_obst_pose.x = closestObst.x();
+    closest_obst_pose.y = closestObst.y();
+    closest_obst_pose.z = closestObst.z();
+    
+    clearance = distance;
+    return true; 
+}
+
 class SparseHashGrid {
 public:
-    float cellSize;
     // map using custom key and hash to store A* Nodes
     std::unordered_map<GridKey, Node, GridKeyHash> grid;
 
@@ -95,17 +164,17 @@ public:
 
 // global pointer
 SparseHashGrid hash_grid; 
-octomap::AbstractOcTree* abstract;
-octomap::OcTree* tree;  
-DynamicEDTOctomap* distmap = nullptr;
-ros::Publisher path_pub; 
 // create an alias for pair (tuple)
 typedef std::pair<double, GridKey> Pair;
-double resolution = 0.4; 
-double minimum_clearance = 0.45; // iris radius (0.25) + half_voxel (0.2)
 
-
+// determine when to build_edt() again
 void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
+    if (abstract) {
+        delete abstract;
+    }
+    if (tree) {
+        delete tree;
+    }
     // msgToMap() returns AbstractOcTree* as the message could theoretically contain any tree type. 
     abstract = octomap_msgs::msgToMap(*msg);
     // get concrete OcTree type
@@ -113,58 +182,6 @@ void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
     if (distmap) {
         distmap->update(); 
     }
-}
-
-// takes in the request and response type defined in the srv file and returns 
-void build_edt()
-{
-    // get minimum and maximum coordinates from octree and create OctoMap point objects
-    double x,y,z;
-    tree->getMetricMin(x,y,z);
-    octomap::point3d min(x,y,z);
-    //std::cout<<"Metric min: "<<x<<","<<y<<","<<z<<std::endl;
-    tree->getMetricMax(x,y,z);
-    octomap::point3d max(x,y,z);
-    //std::cout<<"Metric max: "<<x<<","<<y<<","<<z<<std::endl;
-
-    // treat unknown voxels as free (aggressive approach)
-    bool unknownAsOccupied = false;
-    // indoor value
-    float maxDist = 2.0;    
-    if (distmap) {
-        delete distmap;
-    }
-    // compute an Euclidean Distance Transform (EDT) over an OctoMap to get maximize clearance from obstacles
-    // clamp distance computations and restrict the distance map to a subarea through the arguments
-    distmap = new DynamicEDTOctomap(maxDist, tree, min, max, unknownAsOccupied);    
-    // EDT algorithm: walks through the entire octree and computes, for every free voxel, its distance to nearest occupied voxel
-    // repeated calls incrementally updates the distances to reflect the modified occupancy map
-    distmap->update(); 
-}
-
-bool query_edt(octomap::point3d p, double& clearance)
-{
-    if (!tree || !distmap) {
-        ROS_WARN("edt not built, call build_edt service");
-        return false;
-    }
-
-    if (tree->search(p) == nullptr) {
-        ROS_WARN("queried point never observed by sensor");
-        return false; 
-    }
-
-    octomap::point3d closestObst;
-    float distance;
-    geometry_msgs::Point closest_obst_pose; 
-    // return the distance of the obstacle from the query point and its location
-    distmap->getDistanceAndClosestObstacle(p, distance, closestObst);
-    closest_obst_pose.x = closestObst.x();
-    closest_obst_pose.y = closestObst.y();
-    closest_obst_pose.z = closestObst.z();
-    
-    clearance = distance;
-    return true; 
 }
 
 bool plan_path(planner::plan_path::Request  &req,
@@ -186,7 +203,7 @@ bool plan_path(planner::plan_path::Request  &req,
     return true;
 }
 
-bool is_valid(Node node) {
+bool is_not_valid(Node node) {
     return !node.exist; 
 }
 
@@ -195,7 +212,7 @@ bool is_obstacle(double clearance, double threshold)
     return clearance <= threshold; 
 }
 
-bool is_destination(octomap::point3d current, octomap::point3d destination)
+bool is_destination(const GridKey& current, const GridKey& destination)
 {
     return current == destination; 
 }
@@ -214,8 +231,6 @@ void generate_path(const GridKey& destination_key)
 {
     std::vector<octomap::point3d> path; 
     GridKey key = destination_key; 
-
-    std::printf("Path: \n");
 
     // source does not have parent 
     while (true) {
@@ -257,11 +272,11 @@ void a_star(GridKey source_key, GridKey destination_key)
 {
     // source or destination is an obstacle (collision gurantee)
     if (is_obstacle(hash_grid.grid[source_key].clearance, minimum_clearance) || is_obstacle(hash_grid.grid[destination_key].clearance, minimum_clearance)) {
-        std::printf("source or destination is aligned with an obstacle \n");
+        ROS_WARN("[PLANNER] source or destination is aligned with an obstacle");
         return;
     }
 
-    if (is_destination(hash_grid.grid[source_key].point, hash_grid.grid[destination_key].point)) {
+    if (is_destination(source_key, destination_key)) {
         return;
     }
 
@@ -303,18 +318,19 @@ void a_star(GridKey source_key, GridKey destination_key)
 
                         Node &neighbor = hash_grid.get_or_insert(neighbor_key, neighbor_point); 
 
+                        // skip if neighbor is out of bounds, already visited, or an obstacle
+                        if (is_not_valid(neighbor) || neighbor.closed || is_obstacle(neighbor.clearance, minimum_clearance)) {
+                            continue; 
+                        }
+
                         // neighbor is destination
-                        if (is_destination(neighbor_point, hash_grid.grid[destination_key].point)) {
-                            printf("destination found\n");
+                        if (is_destination(neighbor_key, destination_key)) {
+                            ROS_INFO("[PLANNER] destination found");
                             generate_path(neighbor_key); 
                             found_destination = true;
                             return;
                         }
 
-                        // skip if neighbor is out of bounds, already visited, or an obstacle
-                        if (is_valid(neighbor) || neighbor.closed || is_obstacle(neighbor.clearance, minimum_clearance)) {
-                            continue; 
-                        }
                         // new g, h, f values
                         double g = hash_grid.grid[p.second].g + sqrt(di * di + dj * dj + dk * dk); 
                         double h = calculate_heuristic(neighbor_point, hash_grid.grid[destination_key].point); 
@@ -326,7 +342,7 @@ void a_star(GridKey source_key, GridKey destination_key)
                             neighbor.g = g; 
                             neighbor.h = h; 
                             neighbor.has_parent = true; 
-                            neighbor.parent = hash_grid.world_to_grid(hash_grid.grid[p.second].point);
+                            neighbor.parent = p.second;
                         }
                     }
                 }
@@ -337,7 +353,7 @@ void a_star(GridKey source_key, GridKey destination_key)
     // when the destination cell is not found and the open list is empty, 
     // A* failed to reach the destination cell which may be due to blockages
     if (found_destination == false)
-        printf("failed to find the Destination Cell\n");
+        ROS_WARN("[PLANNER] failed to find the Destination Cell");
     return;
 }
 
