@@ -25,22 +25,6 @@ enum class Mode {
     Waypoint_3,
 };
 
-struct MachineState {
-    //fields 
-    geometry_msgs::PoseStamped pose; 
-    Mode mode; 
-
-    // constructor 
-    MachineState(double x, double y, double z, Mode m) {
-        pose.pose.position.x = x; 
-        pose.pose.position.y = y; 
-        pose.pose.position.z = z; 
-        pose.pose.orientation.w = 1.0; 
-
-        mode = m; 
-    }
-};
-
 // global variables
 bool received_pose = false; 
 
@@ -79,25 +63,6 @@ geometry_msgs::PoseStamped interpolation(geometry_msgs::PoseStamped current, geo
         next_pose.pose.position.z = current.pose.position.z + dz * (step / d); 
     }
     return next_pose;
-}
-
-int find_waypoint(geometry_msgs::PoseStamped current, std::vector<MachineState> states) {
-    int index = 0; 
-
-    double minimum_d = std::numeric_limits<double>::max();
-    int n = states.size(); 
-    // temporarily hard coded 
-    for (int i = 0; i < n; i++) {
-        double dx = states[i].pose.pose.position.x - current.pose.position.x;
-        double dy = states[i].pose.pose.position.y - current.pose.position.y;
-        double dz = states[i].pose.pose.position.z - current.pose.position.z;
-        double d =  std::sqrt(dx * dx + dy * dy + dz * dz);
-        if (d < minimum_d) {
-            index = i;
-            minimum_d = d; 
-        }
-    }
-    return index; 
 }
 
 bool at_waypoint(geometry_msgs::PoseStamped target_pose, double tol) {
@@ -163,11 +128,6 @@ int main(int argc, char **argv) {
     // recommended to enter offboard mode from position mode
     ros::Rate rate(20.0);
 
-    std::vector<MachineState> states = {
-        MachineState(0.0, 0.0, 2.0, Mode::Offboard), MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), 
-        MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3)
-    };
-
     std::vector<geometry_msgs::PoseStamped> waypoints;
 
     int mode_index = 0;
@@ -179,16 +139,15 @@ int main(int argc, char **argv) {
     ros::Time dwell_start_time = ros::Time::now();
     
     ROS_INFO("[OFFB_NODE] initializing...");
-    Mode current_mode;
-    geometry_msgs::PoseStamped command_pose = states[0].pose;
+    geometry_msgs::PoseStamped command_pose = current_pose;
 
     // while ros is running normally... 
     while(ros::ok()) {
         if (current_failure_mode.mode == supervisor::FailureMode::CONTINUE) {
             // in consecutive failures, restart mission and find waypoint again
             if (!new_failure) {
-                current_mode = Mode::Offboard;
                 new_failure = true; 
+                mode_index = 0; 
                 planner_srv.request.start = current_pose; 
                 planner_srv.request.goal = current_failure_mode.destination; 
                 if (planner_client.call(planner_srv))
@@ -211,29 +170,30 @@ int main(int argc, char **argv) {
                 }
             }
 
-            switch (current_mode) {
-
-                case Mode::Waypoint_3: 
-                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                            ROS_INFO("[OFFB_NODE] dwelling completed");
-                            ROS_INFO("[OFFB_NODE] landing...");
-                            dwelling = false; 
-                            // send supervisor a "done" message 
-                            std_msgs::Bool msg; 
-                            msg.data = true; 
-                            supervisor_completion_pub.publish(msg);                        
-                            ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                                mode_index,
-                                states[mode_index].pose.pose.position.x,
-                                states[mode_index].pose.pose.position.y,
-                                states[mode_index].pose.pose.position.z);
-                    }
-                    break;
+            if (mode_index == waypoints.size() - 1) {
+                if (dwell(dwelling, dwell_start_time, waypoints[mode_index], tol)) {
+                        ROS_INFO("[OFFB_NODE] dwelling completed at destination: (%.2f, %.2f, %.2f)",
+                        waypoints[mode_index].pose.position.x,
+                        waypoints[mode_index].pose.position.y,
+                        waypoints[mode_index].pose.position.z);
+                        ROS_INFO("[OFFB_NODE] landing...");
+                        dwelling = false; 
+                        // send supervisor a "done" message 
+                        std_msgs::Bool msg; 
+                        msg.data = true; 
+                        supervisor_completion_pub.publish(msg);                        
+                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
+                            mode_index,
+                            waypoints[mode_index].pose.position.x,
+                            waypoints[mode_index].pose.position.y,
+                            waypoints[mode_index].pose.position.z);
+                }
             }
-            if (mode_index >= 0 && mode_index < states.size()) {
+
+            if (mode_index >= 0 && mode_index < waypoints.size()) {
                 // continue sending the requested pose at the appropriate rate 
                 // interpolation set at 5cm / tick (1 m/s)
-                command_pose = interpolation(command_pose, states[mode_index].pose, 0.05);
+                command_pose = interpolation(command_pose, waypoints[mode_index], 0.05);
                 supervisor_pose_pub.publish(command_pose);
             }
         } else {
