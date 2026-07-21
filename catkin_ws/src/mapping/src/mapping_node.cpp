@@ -10,8 +10,6 @@
 #include <dynamicEDT3D/dynamicEDTOctomap.h>
 #include <iostream>
 
-// header file generated from the srv file 
-#include <mapping/ScanClearance.h>
 
 octomap::AbstractOcTree* abstract;
 octomap::OcTree* tree; 

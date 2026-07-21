@@ -27,7 +27,6 @@ enum class Mode {
     Land,
     RTL, 
     Continue, 
-    Smart_Hover,
     Smart_Land,
     Smart_RTL
 };
@@ -87,6 +86,7 @@ sensor_msgs::BatteryState current_battery;
 bool received_rc = false; 
 Watchdog rc_watchdog(0.4, 0.8);
 bool fallback_done = false;
+bool fallback_failure = false;
 
 geometry_msgs::PoseStamped create_pose(double x, double y, double z) {
     geometry_msgs::PoseStamped pose; 
@@ -97,11 +97,19 @@ geometry_msgs::PoseStamped create_pose(double x, double y, double z) {
     return pose; 
 }
 
-void fallback_cb(const std_msgs::Bool::ConstPtr& msg)
+void fallback_completion_cb(const std_msgs::Bool::ConstPtr& msg)
 {
     if (msg->data) {
         fallback_done = true;
         ROS_INFO("[SUPERVISOR] fallback done");
+    }
+}
+
+void fallback_failure_cb(const std_msgs::Bool::ConstPtr& msg)
+{
+    if (msg->data) {
+        fallback_failure = true;
+        ROS_WARN("[SUPERVISOR] fallback failure");
     }
 }
 
@@ -162,8 +170,11 @@ int main(int argc, char **argv) {
     ros::Subscriber battery_sub = nh.subscribe<sensor_msgs::BatteryState>
         ("mavros/battery", 10, battery_cb);
 
-    ros::Subscriber fallback_sub = nh.subscribe<std_msgs::Bool>
-        ("/supervisor/completion", 10, fallback_cb);
+    ros::Subscriber fallback_completion_sub = nh.subscribe<std_msgs::Bool>
+        ("/supervisor/completion", 10, fallback_completion_cb);
+
+    ros::Subscriber fallback_failure_sub = nh.subscribe<std_msgs::Bool>
+        ("/supervisor/failure", 10, fallback_failure_cb);
 
         
     // publishes the commanded local position (relative to local origin)
@@ -273,10 +284,6 @@ int main(int argc, char **argv) {
                             ROS_INFO("[SUPERVISOR] continuing...");
                             current_mode = Mode::Continue;
                             failure_mode_msg.mode = supervisor::FailureMode::CONTINUE; 
-                        } else if (fallback_mode == "smart_hover") {
-                            ROS_INFO("[SUPERVISOR] hovering(smart)...");
-                            current_mode = Mode::Smart_Hover;
-                            failure_mode_msg.mode = supervisor::FailureMode::SMART_HOVER; 
                         } else if (fallback_mode == "smart_land") {
                             ROS_INFO("[SUPERVISOR] landing(smart)...");
                             current_mode = Mode::Smart_Land;
@@ -331,22 +338,18 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
-                if (fallback_done) {
+                if (fallback_failure) {
+                    ROS_INFO("[SUPERVISOR] fallback failed...");
+                    ROS_INFO("[SUPERVISOR] hovering...");
+                    current_mode = Mode::Hover; 
+                }
+                else if (fallback_done) {
                     ROS_INFO("[SUPERVISOR] fallback completed...");
                     ROS_INFO("[SUPERVISOR] landing...");
                     current_mode = Mode::Land; 
                 } else {
                     local_pos_pub.publish(command_pose);
                 }
-                break;
-            case Mode::Smart_Hover:
-                if (current_state.mode != "OFFBOARD" && 
-                (ros::Time::now() - last_request > ros::Duration(5.0))) {
-                    if (set_mode_client.call(offboard_set_mode) && offboard_set_mode.response.mode_sent) {
-                        ROS_INFO("[SUPERVISOR] smart hovering enabled");
-                    }
-                    last_request = ros::Time::now();
-                } 
                 break;
             case Mode::Smart_Land:
                 if (current_state.mode != "OFFBOARD" && 
@@ -356,7 +359,12 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
-                if (fallback_done) {
+                if (fallback_failure) {
+                    ROS_INFO("[SUPERVISOR] fallback failed...");
+                    ROS_INFO("[SUPERVISOR] hovering...");
+                    current_mode = Mode::Hover; 
+                }
+                else if (fallback_done) {
                     ROS_INFO("[SUPERVISOR] fallback completed...");
                     ROS_INFO("[SUPERVISOR] landing...");
                     current_mode = Mode::Land; 
@@ -372,7 +380,12 @@ int main(int argc, char **argv) {
                     }
                     last_request = ros::Time::now();
                 } 
-                if (fallback_done) {
+                if (fallback_failure) {
+                    ROS_INFO("[SUPERVISOR] fallback failed...");
+                    ROS_INFO("[SUPERVISOR] hovering...");
+                    current_mode = Mode::Hover; 
+                }
+                else if (fallback_done) {
                     ROS_INFO("[SUPERVISOR] fallback completed...");
                     ROS_INFO("[SUPERVISOR] landing...");
                     current_mode = Mode::Land; 

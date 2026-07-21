@@ -147,6 +147,9 @@ int main(int argc, char **argv) {
     // and automatically send it to any new subscriber that connects later
     ros::Publisher supervisor_completion_pub =
     nh.advertise<std_msgs::Bool>("/supervisor/completion", 1, true);
+    ros::Publisher supervisor_failure_pub =
+    nh.advertise<std_msgs::Bool>("/supervisor/failure", 1, true);
+
 
     // publishes the commanded local position (relative to local origin)
     ros::Publisher supervisor_pose_pub = nh.advertise<geometry_msgs::PoseStamped> 
@@ -164,6 +167,8 @@ int main(int argc, char **argv) {
         MachineState(0.0, 0.0, 2.0, Mode::Offboard), MachineState(0.0, 0.0, 2.0, Mode::Waypoint_0), MachineState(0.0, 9.5, 2.0, Mode::Waypoint_1), 
         MachineState(-15.0, 9.5, 2.0, Mode::Waypoint_2), MachineState(-15.0, 15.0, 2.0, Mode::Waypoint_3)
     };
+
+    std::vector<geometry_msgs::PoseStamped> waypoints;
 
     int mode_index = 0;
     bool dwelling = false; 
@@ -184,66 +189,30 @@ int main(int argc, char **argv) {
             if (!new_failure) {
                 current_mode = Mode::Offboard;
                 new_failure = true; 
-                // planner_srv.request.a = atoll(argv[1]);
-                // planner_srv.request.b = atoll(argv[2]);
+                planner_srv.request.start = current_pose; 
+                planner_srv.request.goal = current_failure_mode.destination; 
                 if (planner_client.call(planner_srv))
                 {
+                    if (planner_srv.response.success) {
+                        waypoints = planner_srv.response.path.poses; 
+                    }
+                    else {
+                        ROS_WARN("[OFFB_NODE] planner server failed to generate path");
+                        std_msgs::Bool msg; 
+                        msg.data = true; 
+                        supervisor_failure_pub.publish(msg); 
+                    }
+                } else {
+                    ROS_WARN("[OFFB_NODE] planner service call failed");
+                    // send supervisor a failure message 
+                    std_msgs::Bool msg; 
+                    msg.data = true; 
+                    supervisor_failure_pub.publish(msg); 
                 }
             }
-            switch (current_mode) {
-                case Mode::Offboard:
-                    if (current_state.mode == "OFFBOARD") {
-                        mode_index = find_waypoint(current_pose, states);
-                        current_mode = states[mode_index].mode;
-                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                            mode_index,
-                            states[mode_index].pose.pose.position.x,
-                            states[mode_index].pose.pose.position.y,
-                            states[mode_index].pose.pose.position.z);
-                    }
-                    break;
-                case Mode::Waypoint_0:
-                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_1;
-                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                            mode_index,
-                            states[mode_index].pose.pose.position.x,
-                            states[mode_index].pose.pose.position.y,
-                            states[mode_index].pose.pose.position.z);
-                        
-                    }
-                    break;
-                case Mode::Waypoint_1: 
-                    // handleMode(current_mode);
-                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_2;
-                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                            mode_index,
-                            states[mode_index].pose.pose.position.x,
-                            states[mode_index].pose.pose.position.y,
-                            states[mode_index].pose.pose.position.z);
-                    }
 
-                    break;
-                case Mode::Waypoint_2: 
-                    if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
-                        ROS_INFO("[OFFB_NODE] dwelling completed");
-                        dwelling = false; 
-                        mode_index += 1; 
-                        current_mode = Mode::Waypoint_3;
-                        ROS_INFO("[OFFB_NODE] navigating to waypoint %d: (%.2f, %.2f, %.2f)", 
-                            mode_index,
-                            states[mode_index].pose.pose.position.x,
-                            states[mode_index].pose.pose.position.y,
-                            states[mode_index].pose.pose.position.z);
-                    }
-                    break;
+            switch (current_mode) {
+
                 case Mode::Waypoint_3: 
                     if (dwell(dwelling, dwell_start_time, states[mode_index].pose, tol)) {
                             ROS_INFO("[OFFB_NODE] dwelling completed");

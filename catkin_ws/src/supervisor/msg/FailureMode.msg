@@ -10,3 +10,4 @@ uint8 SMART_RTL=7
 
 # current enum value
 uint8 mode
+geometry_msgs/PoseStamped destination 
