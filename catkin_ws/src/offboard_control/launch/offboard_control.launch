@@ -104,7 +104,6 @@
         <param name="fallback_mode" value="$(arg fallback_mode)"/>
         <param name="source" value="$(arg source)" />
         <param name="destination" value="$(arg destination)" />
-
     </node>
 
     <!-- set COM_RC_LOSS_T and COM_DL_LOSS_T values to isolate supervisor behavior from PX4 firmware failsafes -->
@@ -113,6 +112,8 @@
     <node pkg="offboard_control" type="set_px4_params.py" name="set_px4_params" output="screen"/>
     <node pkg="offboard_control" type="offboard_control_node" name="offboard_control_node" output="screen"/>
     <node pkg="rtl" type="rtl_node" name="rtl_node" output="screen"/>
+    
+    <node pkg="planner" type="planner_node" name="planner_node" output="screen"/>
 
     <!--  rviz -->
     <arg name="rviz" default="true"/>

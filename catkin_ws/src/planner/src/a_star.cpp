@@ -61,6 +61,10 @@ struct Node {
         point = p; 
     }
 
+    Node () {
+        
+    }
+
     double get_f() {
         return g + h; 
     }
@@ -153,8 +157,9 @@ public:
             double clearance;
             node.exist = query_edt(p, clearance);
             node.clearance = clearance;
-            grid[key] = node; 
-            return grid[key];
+            
+            auto [default_iterator, inserted] = grid.emplace(key, std::move(node));
+            return default_iterator->second;
         } else {
             // the second element in the iterator<GridKey, Node, GridKeyHash> is Node 
             return iterator->second; 
@@ -182,25 +187,6 @@ void octomap_cb(const octomap_msgs::Octomap::ConstPtr &msg){
     if (distmap) {
         distmap->update(); 
     }
-}
-
-bool plan_path(planner::plan_path::Request  &req,
-        planner::plan_path::Response &res)
-{
-    if (!distmap) {
-       build_edt();
-        // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
-        tree->writeBinary("/tmp/tree.bt");
-    }
-    octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
-    octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
-    GridKey start_key = hash_grid.world_to_grid(start);
-    GridKey goal_key = hash_grid.world_to_grid(goal);
-    Node source = hash_grid.get_or_insert(start_key, start);
-    Node destination = hash_grid.get_or_insert(goal_key, goal);
-
-    a_star(start_key, goal_key);
-    return true;
 }
 
 bool is_not_valid(Node node) {
@@ -356,6 +342,26 @@ void a_star(GridKey source_key, GridKey destination_key)
         ROS_WARN("[PLANNER] failed to find the Destination Cell");
     return;
 }
+
+bool plan_path(planner::plan_path::Request  &req,
+        planner::plan_path::Response &res)
+{
+    if (!distmap) {
+       build_edt();
+        // check resolution looks right and confirm coordinate frames are aligned: $ octovis simple_tree.bt
+        tree->writeBinary("/tmp/tree.bt");
+    }
+    octomap::point3d start(req.start.pose.position.x, req.start.pose.position.y, req.start.pose.position.z);
+    octomap::point3d goal(req.goal.pose.position.x, req.goal.pose.position.y, req.goal.pose.position.z);
+    GridKey start_key = hash_grid.world_to_grid(start);
+    GridKey goal_key = hash_grid.world_to_grid(goal);
+    Node source = hash_grid.get_or_insert(start_key, start);
+    Node destination = hash_grid.get_or_insert(goal_key, goal);
+
+    a_star(start_key, goal_key);
+    return true;
+}
+
 
 int main(int argc, char** argv) {
     ros::init(argc, argv, "planner_node");
